@@ -12,7 +12,13 @@ import {
   buyRepair,
   chooseSaveMoney,
   finishDay,
-  advanceDay
+  advanceDay,
+  beginManagementWeek,
+  completeRequiredAction,
+  startWeeklyMatch,
+  chooseMatchHighlight,
+  finishManagementDay,
+  advanceCampaignDay
 } from './game-state.js';
 
 function gatherAll(state) {
@@ -130,4 +136,54 @@ test('a repaired facility cannot be purchased again on a later day', () => {
   assert.equal(state.eveningChoice, null);
   assert.equal(state.money, before.money);
   assert.deepEqual(state.repairs, ['awning']);
+});
+
+test('the management week advances only after each required action', () => {
+  const prologue = {
+    ...createGameState(),
+    dayIndex: 2,
+    phase: 'complete',
+    chapterComplete: true,
+    money: 100
+  };
+  let state = beginManagementWeek(prologue);
+  assert.equal(state.dayIndex, 3);
+  const blocked = finishManagementDay(state);
+  assert.equal(blocked.phase, 'morning');
+  state = completeRequiredAction(state, 'review-ledger', 'acknowledge');
+  state = finishManagementDay(state);
+  state = advanceCampaignDay(state);
+  assert.equal(state.dayIndex, 4);
+});
+
+test('seven management actions produce a weekly settlement', () => {
+  const prologue = {
+    ...createGameState(),
+    dayIndex: 2,
+    phase: 'complete',
+    chapterComplete: true,
+    money: 100
+  };
+  let state = beginManagementWeek(prologue);
+  const choices = [
+    ['review-ledger', 'acknowledge'],
+    ['choose-training', 'shape'],
+    ['choose-opponent', 'harbor-workers'],
+    ['choose-market', 'youth-clinic'],
+    ['prepare-facility', 'grass'],
+    ['welcome-opponent', 'community-welcome']
+  ];
+  for (const [action, choice] of choices) {
+    state = completeRequiredAction(state, action, choice);
+    state = finishManagementDay(state);
+    state = advanceCampaignDay(state);
+  }
+  state = startWeeklyMatch(state);
+  state = chooseMatchHighlight(state, 'patient-build');
+  state = chooseMatchHighlight(state, 'protect-youngster');
+  state = chooseMatchHighlight(state, 'press-late');
+  state = finishManagementDay(state);
+  assert.equal(state.management.weekComplete, true);
+  assert.ok(state.management.settlement);
+  assert.deepEqual(state.management.matchResult.score, { home: 2, away: 1 });
 });
