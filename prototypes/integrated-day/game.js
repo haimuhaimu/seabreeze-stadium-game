@@ -1,0 +1,883 @@
+import { getDayContent, getOrders, requiredInventoryForDay } from './daily-content.js';
+import {
+  GATHERABLES,
+  REPAIRS,
+  createGameState,
+  collectItem,
+  talkToCoach,
+  startTraining,
+  finishTraining,
+  openShop,
+  serveOrder,
+  buyRepair,
+  chooseSaveMoney,
+  finishDay,
+  advanceDay
+} from './game-state.js';
+import { loadSave, writeSave, clearSave } from './save-game.js';
+import { TRAINING_TARGETS, createTrainingSession, takeShot } from './training-game.js';
+
+const root = document.querySelector('.game');
+const viewport = document.querySelector('[data-scene]');
+const plane = document.querySelector('[data-world-plane]');
+const player = document.querySelector('[data-player]');
+const prompt = document.querySelector('[data-prompt]');
+const toastHost = document.querySelector('[data-toast-host]');
+const speech = document.querySelector('[data-speech]');
+const morningLayer = document.querySelector('[data-morning-layer]');
+const shopActors = document.querySelector('[data-shop-actors]');
+const shopPanel = document.querySelector('[data-shop]');
+const repairPanel = document.querySelector('[data-repairs]');
+const notes = document.querySelector('[data-notes]');
+const summary = document.querySelector('[data-summary]');
+const chapterSummary = document.querySelector('[data-chapter-summary]');
+const startCard = document.querySelector('[data-start-card]');
+const trainingLayer = document.querySelector('[data-training]');
+const summaryDim = document.querySelector('[data-summary-dim]');
+const resourceIcon = document.querySelector('.money-slot .item-sprite');
+const touchControls = document.querySelector('.touch-controls');
+const touchAction = document.querySelector('[data-action]');
+
+const MAP_SIZE = { width: 1672, height: 941 };
+const WALK_SPEED = 230;
+const ARRIVAL_DISTANCE = 8;
+const INTERACTION_DISTANCE = 112;
+const START_POSITION = Object.freeze({ x: 50, y: 89 });
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+const customerClasses = {
+  林川: 'npc-linchuan',
+  许姨: 'npc-sumi',
+  乔可: 'npc-qiaoqiao',
+  邓叔: 'npc-wenshu',
+  小满: 'npc-assistant',
+  郭教练: 'npc-guo'
+};
+
+const worldObjects = {
+  'tea-a': { x: 28, y: 85, approach: { x: 31, y: 82 }, kind: 'gather', label: '收起入口花槽里的茶草' },
+  'tea-b': { x: 62, y: 78, approach: { x: 60, y: 82 }, kind: 'gather', label: '收起围网边的茶草' },
+  'fruit-a': { x: 82, y: 32, approach: { x: 84, y: 42 }, kind: 'gather', label: '收起小店旁的果子' },
+  'fruit-b': { x: 16, y: 85, approach: { x: 20, y: 83 }, kind: 'gather', label: '捡起自行车架旁的果子' },
+  coach: { x: 55, y: 55, approach: { x: 55, y: 64 }, kind: 'coach', label: '和郭教练说话' },
+  shop: { x: 73, y: 31, approach: { x: 73, y: 42 }, kind: 'shop', label: '打开场边小店' }
+};
+
+const blockedAreas = [
+  { x1: 0, y1: 0, x2: 100, y2: 23.5 },
+  { x1: 29, y1: 18, x2: 59, y2: 40 },
+  { x1: 59, y1: 19, x2: 84, y2: 40 },
+  { x1: 0, y1: 35, x2: 23.5, y2: 76 },
+  { x1: 87, y1: 42, x2: 100, y2: 79 }
+];
+
+const loaded = loadSave(localStorage);
+let state = loaded.ok ? loaded.record.state : createGameState();
+let position = loaded.ok ? loaded.record.position : { ...START_POSITION };
+let hasStarted = loaded.reason === 'absent';
+let destination = null;
+let pendingInteraction = null;
+let toastTimer = 0;
+let speechTimer = 0;
+let lastFrame = performance.now();
+let lastPositionSave = 0;
+let moving = false;
+let lastProximityId = Symbol('initial');
+let trainingActive = false;
+let trainingSession = null;
+let trainingPointer = 0.5;
+let trainingFeedback = '';
+let newGameArmed = false;
+let chapterResetArmed = false;
+const pressedKeys = new Set();
+
+function currentDay() {
+  return getDayContent(state.dayIndex);
+}
+
+function currentOrders() {
+  return getOrders(state.dayIndex);
+}
+
+function formatTime(minutes) {
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+function persist() {
+  if (!hasStarted) return;
+  writeSave(localStorage, state, position);
+  lastPositionSave = performance.now();
+}
+
+function hasIngredients(inventory, required) {
+  return Object.entries(required).every(([key, amount]) => inventory[key] >= amount);
+}
+
+function isShopReady() {
+  return hasIngredients(state.inventory, requiredInventoryForDay(state.dayIndex));
+}
+
+function toPixels(point) {
+  return {
+    x: point.x * plane.clientWidth / 100,
+    y: point.y * plane.clientHeight / 100
+  };
+}
+
+function pixelDistance(a, b) {
+  const pa = toPixels(a);
+  const pb = toPixels(b);
+  return Math.hypot(pa.x - pb.x, pa.y - pb.y);
+}
+
+function canStand(x, y) {
+  if (x < 1.5 || x > 98 || y < 24 || y > 96) return false;
+  return !blockedAreas.some(area => x > area.x1 && x < area.x2 && y > area.y1 && y < area.y2);
+}
+
+function availableObject(id) {
+  if (!hasStarted || trainingActive || state.phase !== 'morning') return false;
+  if (GATHERABLES[id] && state.collectedToday.includes(id)) return false;
+  return Boolean(worldObjects[id]);
+}
+
+function nearestObject() {
+  if (state.phase !== 'morning') return null;
+  let closest = null;
+  for (const [id, object] of Object.entries(worldObjects)) {
+    if (!availableObject(id)) continue;
+    const distance = pixelDistance(position, object);
+    if (distance <= INTERACTION_DISTANCE && (!closest || distance < closest.distance)) {
+      closest = { id, ...object, distance };
+    }
+  }
+  return closest;
+}
+
+function showToast(text) {
+  if (!text) return;
+  window.clearTimeout(toastTimer);
+  toastHost.replaceChildren();
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.textContent = text;
+  toastHost.appendChild(toast);
+  toastTimer = window.setTimeout(() => toast.remove(), 2600);
+}
+
+function showSpeech(name, copy, point, duration = 3600) {
+  window.clearTimeout(speechTimer);
+  document.querySelector('[data-speech-name]').textContent = name;
+  document.querySelector('[data-speech-copy]').textContent = copy;
+  speech.style.left = `${point.x}%`;
+  speech.style.top = `${point.y}%`;
+  speech.hidden = false;
+  speechTimer = window.setTimeout(() => { speech.hidden = true; }, duration);
+}
+
+function applyTransition(transition, successCheck) {
+  const previous = state;
+  state = transition(state);
+  const successful = successCheck ? successCheck(previous, state) : previous !== state;
+  showToast(state.journal.at(-1)?.text);
+  if (successful) persist();
+  render();
+  return successful;
+}
+
+function inventoryShortageCopy() {
+  const required = requiredInventoryForDay(state.dayIndex);
+  const labels = { tea: '茶', fruit: '果子', cloth: '布', water: '水' };
+  const shortages = Object.entries(required)
+    .map(([key, amount]) => [labels[key], Math.max(0, amount - state.inventory[key])])
+    .filter(([, amount]) => amount > 0)
+    .map(([label, amount]) => `${label} ${amount}`);
+  return shortages.join('、');
+}
+
+function phaseDetails() {
+  if (state.phase === 'morning') {
+    const trainingHint = currentDay().trainingAvailable && !state.training.completedToday
+      ? ' 郭教练也在等你踢三脚。'
+      : '';
+    return {
+      title: currentDay().title,
+      goal: isShopReady()
+        ? `备料齐了。去小店把木牌翻过来。${trainingHint}`
+        : `沿场边准备今天的订单，还缺 ${inventoryShortageCopy()}。${trainingHint}`,
+      label: '体力',
+      value: String(state.energy),
+      icon: 'item-tea'
+    };
+  }
+  if (state.phase === 'shop') {
+    const order = currentOrders()[state.ordersServed];
+    return {
+      title: '场边小店',
+      goal: `柜台前还有 ${currentOrders().length - state.ordersServed} 位客人。${order.customer}正在等。`,
+      label: '零钱',
+      value: `${state.money}元`,
+      icon: 'item-coins'
+    };
+  }
+  if (state.phase === 'evening') {
+    return {
+      title: '傍晚的场地',
+      goal: state.eveningChoice ? '今晚的安排定好了，可以回屋休息。' : '修缮一处，或者把今天的钱存下。',
+      label: '零钱',
+      value: `${state.money}元`,
+      icon: 'item-coins'
+    };
+  }
+  return {
+    title: '夜晚',
+    goal: state.dayIndex === 2 ? '友谊赛散场了，大家还没有急着离开。' : '今天留下的东西，明天仍然看得见。',
+    label: '零钱',
+    value: `${state.money}元`,
+    icon: 'item-coins'
+  };
+}
+
+function renderCalendar() {
+  const day = currentDay();
+  document.querySelector('[data-date]').textContent = `${day.season} ${day.date}`;
+  document.querySelector('[data-weather]').textContent = day.weather;
+}
+
+function renderPhases() {
+  const order = ['morning', 'shop', 'evening', 'complete'];
+  const currentIndex = order.indexOf(state.phase);
+  document.querySelectorAll('[data-phase-step]').forEach(step => {
+    const stepIndex = order.indexOf(step.dataset.phaseStep);
+    step.classList.toggle('active', stepIndex === currentIndex);
+    step.classList.toggle('done', stepIndex < currentIndex);
+  });
+}
+
+function renderJournal() {
+  const log = document.querySelector('[data-journal-log]');
+  log.innerHTML = state.journal.slice(-7).map(entry => (
+    `<li><time>${formatTime(entry.minute)}</time>${entry.text}</li>`
+  )).join('');
+
+  const history = document.querySelector('[data-history-log]');
+  history.hidden = state.history.length === 0;
+  history.innerHTML = state.history.length
+    ? `<span>前几天</span>${state.history.map(day => `<p>春 ${day.date}：接待 ${getOrders(day.dayIndex).length} 人，余下 ${day.money} 元</p>`).join('')}`
+    : '';
+}
+
+function updateProximity(force = false) {
+  const nearby = nearestObject();
+  const proximityId = nearby?.id ?? null;
+  if (!force && lastProximityId === proximityId) return;
+  lastProximityId = proximityId;
+  document.querySelectorAll('[data-object]').forEach(element => {
+    element.classList.toggle('nearby', nearby?.id === element.dataset.object);
+  });
+
+  prompt.classList.toggle('active', Boolean(nearby));
+  if (trainingActive) {
+    prompt.innerHTML = '<kbd>E</kbd><span>射门</span><small>看准珊瑚色区域</small>';
+  } else if (state.phase === 'morning') {
+    prompt.innerHTML = nearby
+      ? `<kbd>E</kbd><span>${nearby.label}</span><small>已经走到附近</small>`
+      : '<kbd>WASD</kbd><span>走动</span><kbd>E</kbd><span>互动</span><small>也可以点击要去的地方</small>';
+  } else if (state.phase === 'shop') {
+    prompt.innerHTML = '<small>看一眼客人的需要，再从柜台上选择</small>';
+  } else if (state.phase === 'evening') {
+    prompt.innerHTML = '<small>今晚也可以先把钱存下</small>';
+  }
+  prompt.hidden = !hasStarted || state.phase === 'complete';
+}
+
+function renderWorldTargets() {
+  morningLayer.hidden = state.phase !== 'morning';
+  for (const id of Object.keys(GATHERABLES)) {
+    document.querySelector(`[data-object="${id}"]`).hidden = state.collectedToday.includes(id);
+  }
+
+  const trainingReady = currentDay().trainingAvailable && !state.training.completedToday;
+  const coach = document.querySelector('[data-object="coach"]');
+  coach.classList.toggle('met', state.relationship.coachMet);
+  coach.setAttribute('aria-label', trainingReady ? '和郭教练踢三脚' : '和郭教练说话');
+  worldObjects.coach.label = trainingReady ? '和郭教练踢三脚' : '和郭教练说话';
+
+  const door = document.querySelector('[data-open-shop]');
+  door.classList.toggle('ready', isShopReady());
+  document.querySelector('[data-door-label]').textContent = isShopReady() ? '可以开店' : '场边小店';
+  updateProximity(true);
+}
+
+function setCustomerSprite(customer) {
+  const sprite = document.querySelector('[data-customer-sprite]');
+  sprite.className = 'npc-sprite';
+  sprite.classList.add(customerClasses[customer] ?? 'npc-assistant');
+}
+
+function orderCopy(order) {
+  if (order.recipe === 'tea') return '刚从场上下来，想喝一杯青草茶。';
+  if (order.recipe === 'fruit') return '海风吹得口干，想要一杯凉的果子水。';
+  return '手上沾了球网的灰，想拿一条干净毛巾。';
+}
+
+function renderShop() {
+  const active = state.phase === 'shop';
+  shopPanel.hidden = !active;
+  shopActors.hidden = !active;
+  if (!active) return;
+  const order = currentOrders()[state.ordersServed];
+  document.querySelector('[data-customer-name]').textContent = order.customer;
+  document.querySelector('[data-order-copy]').textContent = orderCopy(order);
+  setCustomerSprite(order.customer);
+}
+
+function renderRepairs() {
+  repairPanel.hidden = state.phase !== 'evening';
+  document.querySelectorAll('[data-repair]').forEach(button => {
+    const repairId = button.dataset.repair;
+    const repair = REPAIRS[repairId];
+    button.hidden = state.repairs.includes(repairId);
+    button.disabled = Boolean(state.eveningChoice) || state.money < repair.cost;
+  });
+  const saveButton = document.querySelector('[data-save-money]');
+  saveButton.classList.toggle('selected', state.eveningChoice === 'save');
+  saveButton.disabled = Boolean(state.eveningChoice);
+  document.querySelector('[data-finish-day]').disabled = !state.eveningChoice;
+
+  document.querySelectorAll('[data-repair-visual]').forEach(visual => {
+    visual.hidden = !state.repairs.includes(visual.dataset.repairVisual);
+  });
+}
+
+function renderSummary() {
+  const complete = state.phase === 'complete' && !state.chapterComplete;
+  summary.hidden = !complete;
+  if (!complete) return;
+
+  const day = currentDay();
+  const history = state.history.at(-1);
+  const repair = history?.repair ? REPAIRS[history.repair] : null;
+  document.querySelector('[data-summary-date]').textContent = `${day.season} ${day.date} · 晚间`;
+  document.querySelector('[data-summary-title]').textContent = day.date === 14 ? '友谊赛散场了' : '今天留下了痕迹';
+  document.querySelector('[data-summary-copy]').textContent = repair
+    ? `${repair.result}海风停下来以后，场地看上去比早晨更像一个会继续存在的地方。`
+    : '安若童把今天的钱留了下来。没有立刻改变的地方，也已经被认真看见。';
+  document.querySelector('[data-summary-orders]').textContent = `${currentOrders().length} 人`;
+  document.querySelector('[data-summary-repair]').textContent = repair?.label ?? '今天先存下';
+  document.querySelector('[data-summary-money]').textContent = `${state.money} 元`;
+  document.querySelector('[data-summary-person]').textContent = state.training.lastScore !== null
+    ? `训练 ${state.training.lastScore} 分`
+    : state.relationship.coachMet ? '郭教练' : '留到明天';
+  document.querySelector('[data-next-day]').textContent = day.date === 14 ? '看看这三天' : `去往春 ${day.date + 1} 日`;
+}
+
+function renderChapterSummary() {
+  chapterSummary.hidden = !state.chapterComplete;
+  if (!state.chapterComplete) return;
+  document.querySelector('[data-chapter-history]').innerHTML = state.history.map(day => {
+    const repair = day.repair ? REPAIRS[day.repair].label : '存下收入';
+    const training = day.trainingScore === null ? '没有训练' : `训练 ${day.trainingScore} 分`;
+    return `<article><span>春 ${day.date}</span><strong>${day.title}</strong><small>收入 ${day.revenue} 元<br>${repair}<br>${training}</small></article>`;
+  }).join('');
+}
+
+function renderTraining() {
+  root.classList.toggle('training-active', trainingActive);
+  trainingLayer.hidden = !trainingActive;
+  touchControls.hidden = trainingActive || state.phase !== 'morning';
+  touchAction.hidden = trainingActive || state.phase !== 'morning';
+  if (!trainingActive || !trainingSession) return;
+
+  const target = TRAINING_TARGETS[trainingSession.shotIndex];
+  document.querySelector('[data-training-count]').textContent = `第 ${trainingSession.shotIndex + 1} 脚`;
+  document.querySelector('[data-training-score]').textContent = trainingFeedback
+    ? `${trainingSession.score} 分 · ${trainingFeedback}`
+    : `现在 ${trainingSession.score} 分`;
+  document.querySelector('[data-training-zone]').style.left = `${target * 100}%`;
+  document.querySelector('[data-training-target]').style.left = `${target * 100}%`;
+  document.querySelector('[data-training-pointer]').style.left = `${trainingPointer * 100}%`;
+}
+
+function renderStartCard() {
+  startCard.hidden = hasStarted;
+  if (hasStarted) return;
+  const continueButton = document.querySelector('[data-continue]');
+  continueButton.hidden = !loaded.ok;
+  document.querySelector('[data-save-summary]').textContent = loaded.ok
+    ? `存档停在春 ${getDayContent(state.dayIndex).date} 日，${state.money} 元，已经修好 ${state.repairs.length} 处。`
+    : '这份存档无法读取。可以重新从抵达海风球场的早晨开始。';
+}
+
+function renderModals() {
+  renderSummary();
+  renderChapterSummary();
+  renderStartCard();
+  summaryDim.hidden = summary.hidden && chapterSummary.hidden && startCard.hidden;
+}
+
+function render() {
+  root.dataset.phase = state.phase;
+  root.dataset.day = String(state.dayIndex);
+  const details = phaseDetails();
+  renderCalendar();
+  document.querySelector('[data-time]').textContent = formatTime(state.minute);
+  document.querySelector('[data-phase-title]').textContent = details.title;
+  document.querySelector('[data-current-goal]').textContent = details.goal;
+  document.querySelector('[data-resource-label]').textContent = details.label;
+  document.querySelector('[data-resource-value]').textContent = details.value;
+  resourceIcon.classList.remove('item-tea', 'item-coins');
+  resourceIcon.classList.add(details.icon);
+
+  for (const [key, value] of Object.entries(state.inventory)) {
+    document.querySelector(`[data-inventory="${key}"]`).textContent = value;
+  }
+
+  const optional = document.querySelector('[data-optional-event]');
+  optional.classList.toggle('complete', state.relationship.coachMet);
+  const trustCopy = state.relationship.coachTrust > 0 ? `，默契 ${state.relationship.coachTrust}` : '';
+  document.querySelector('[data-relationship-status]').textContent = state.relationship.coachMet
+    ? `郭教练已经记住了你的名字${trustCopy}`
+    : '还没有和郭教练说话';
+
+  renderPhases();
+  renderJournal();
+  renderWorldTargets();
+  renderShop();
+  renderRepairs();
+  renderTraining();
+  renderModals();
+  updatePlayerVisual();
+}
+
+function beginTraining() {
+  const started = applyTransition(
+    startTraining,
+    (before, after) => !before.training.started && after.training.started
+  );
+  if (!started) return false;
+  trainingSession = createTrainingSession();
+  trainingPointer = reducedMotion.matches ? TRAINING_TARGETS[0] : 0.5;
+  trainingFeedback = '';
+  trainingActive = true;
+  destination = null;
+  pendingInteraction = null;
+  toastHost.replaceChildren();
+  showSpeech('郭教练', '不用证明什么。看准了，踢三脚就好。', { x: 53, y: 48 }, 3000);
+  render();
+  return true;
+}
+
+function resolveTrainingShot(pointer = trainingPointer) {
+  if (!trainingActive || !trainingSession) return false;
+  const beforeScore = trainingSession.score;
+  trainingSession = takeShot(trainingSession, pointer);
+  const points = trainingSession.score - beforeScore;
+  trainingFeedback = points === 2 ? '正中目标' : points === 1 ? '擦到边缘' : '偏了一点';
+
+  if (trainingSession.complete) {
+    const finalScore = trainingSession.score;
+    trainingActive = false;
+    trainingFeedback = '';
+    applyTransition(
+      current => finishTraining(current, finalScore),
+      (before, after) => !before.training.completedToday && after.training.completedToday
+    );
+    showSpeech('郭教练', finalScore >= 5 ? '下周训练，你也站我们这边。' : '脚感会慢慢回来的。', { x: 53, y: 48 }, 3400);
+  } else {
+    if (reducedMotion.matches) trainingPointer = TRAINING_TARGETS[trainingSession.shotIndex];
+    renderTraining();
+  }
+  return true;
+}
+
+function interact(id) {
+  if (!availableObject(id)) return false;
+  const object = worldObjects[id];
+  if (pixelDistance(position, object) > INTERACTION_DISTANCE) {
+    showToast('要走近一点，才能看清。');
+    return false;
+  }
+
+  let successful = false;
+  if (object.kind === 'gather') {
+    successful = applyTransition(
+      current => collectItem(current, id),
+      (before, after) => after.collectedToday.length > before.collectedToday.length
+    );
+  }
+  if (object.kind === 'coach') {
+    if (currentDay().trainingAvailable && !state.training.completedToday) {
+      successful = beginTraining();
+    } else {
+      successful = applyTransition(
+        talkToCoach,
+        (before, after) => !before.relationship.coachMet && after.relationship.coachMet
+      );
+      showSpeech(
+        '郭教练',
+        successful ? '我还以为你是来让大家收拾东西的。既然不是，就先随便看看吧。' : '海边的风向一天会变好几次。',
+        { x: 53, y: 48 }
+      );
+    }
+  }
+  if (object.kind === 'shop') {
+    successful = applyTransition(openShop, (before, after) => before.phase !== after.phase);
+    if (successful) {
+      destination = null;
+      pendingInteraction = null;
+      position = { x: 73, y: 43 };
+      persist();
+      showSpeech(currentOrders()[0].customer, '今天这里真的开门？那我先来。', { x: 70, y: 35 }, 2800);
+    }
+  }
+  return successful;
+}
+
+function interactNearest() {
+  if (trainingActive) {
+    resolveTrainingShot();
+    return;
+  }
+  const nearby = nearestObject();
+  if (nearby) interact(nearby.id);
+  else if (state.phase === 'morning') showToast('附近暂时没有要处理的东西。');
+}
+
+function walkToObject(id) {
+  const object = worldObjects[id];
+  if (!object || !availableObject(id)) return false;
+  destination = { ...object.approach };
+  pendingInteraction = id;
+  return true;
+}
+
+function updateDirection(dx, dy) {
+  if (Math.abs(dx) > Math.abs(dy)) player.dataset.direction = dx < 0 ? 'left' : 'right';
+  else if (Math.abs(dy) > 0.001) player.dataset.direction = dy < 0 ? 'up' : 'down';
+}
+
+function tryMove(dxPixels, dyPixels) {
+  if (!dxPixels && !dyPixels) return false;
+  const nextX = position.x + dxPixels / plane.clientWidth * 100;
+  const nextY = position.y + dyPixels / plane.clientHeight * 100;
+  let changed = false;
+
+  if (canStand(nextX, position.y)) {
+    position.x = nextX;
+    changed = true;
+  }
+  if (canStand(position.x, nextY)) {
+    position.y = nextY;
+    changed = true;
+  }
+  return changed;
+}
+
+function keyboardVector() {
+  const left = pressedKeys.has('a') || pressedKeys.has('ArrowLeft');
+  const right = pressedKeys.has('d') || pressedKeys.has('ArrowRight');
+  const up = pressedKeys.has('w') || pressedKeys.has('ArrowUp');
+  const down = pressedKeys.has('s') || pressedKeys.has('ArrowDown');
+  return { x: Number(right) - Number(left), y: Number(down) - Number(up) };
+}
+
+function advanceMovement(deltaSeconds, timestamp) {
+  if (!hasStarted || trainingActive || state.phase !== 'morning' || !summary.hidden || !chapterSummary.hidden) {
+    moving = false;
+    player.classList.remove('moving');
+    player.dataset.frame = '0';
+    return;
+  }
+
+  let vector = keyboardVector();
+  if (vector.x || vector.y) {
+    destination = null;
+    pendingInteraction = null;
+  } else if (destination) {
+    const current = toPixels(position);
+    const goal = toPixels(destination);
+    vector = { x: goal.x - current.x, y: goal.y - current.y };
+    if (Math.hypot(vector.x, vector.y) <= ARRIVAL_DISTANCE) {
+      position = { ...destination };
+      destination = null;
+      const interaction = pendingInteraction;
+      pendingInteraction = null;
+      if (interaction) interact(interaction);
+      vector = { x: 0, y: 0 };
+    }
+  }
+
+  const length = Math.hypot(vector.x, vector.y);
+  moving = length > 0.001;
+  if (moving) {
+    const unitX = vector.x / length;
+    const unitY = vector.y / length;
+    updateDirection(unitX, unitY);
+    tryMove(unitX * WALK_SPEED * deltaSeconds, unitY * WALK_SPEED * deltaSeconds);
+    player.dataset.frame = String(Math.floor(timestamp / 135) % 4);
+    player.classList.add('moving');
+    if (hasStarted && timestamp - lastPositionSave > 2000) persist();
+  } else {
+    player.dataset.frame = '0';
+    player.classList.remove('moving');
+  }
+}
+
+function updatePlayerVisual() {
+  player.style.setProperty('--screen-x', `${position.x * plane.clientWidth / 100}px`);
+  player.style.setProperty('--screen-y', `${position.y * plane.clientHeight / 100}px`);
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function fitWorld() {
+  const viewportWidth = viewport.clientWidth;
+  const viewportHeight = viewport.clientHeight;
+  const scale = Math.max(viewportWidth / MAP_SIZE.width, viewportHeight / MAP_SIZE.height);
+  plane.style.width = `${Math.ceil(MAP_SIZE.width * scale)}px`;
+  plane.style.height = `${Math.ceil(MAP_SIZE.height * scale)}px`;
+  updatePlayerVisual();
+  updateCamera();
+}
+
+function updateCamera() {
+  const viewportWidth = viewport.clientWidth;
+  const viewportHeight = viewport.clientHeight;
+  const focusX = position.x * plane.clientWidth / 100;
+  const focusY = position.y * plane.clientHeight / 100;
+  const cameraX = clamp(viewportWidth / 2 - focusX, viewportWidth - plane.clientWidth, 0);
+  const cameraY = clamp(viewportHeight / 2 - focusY, viewportHeight - plane.clientHeight, 0);
+  plane.style.setProperty('--camera-x', `${cameraX}px`);
+  plane.style.setProperty('--camera-y', `${cameraY}px`);
+}
+
+function pointerAt(timestamp) {
+  const cycle = (timestamp % 1800) / 1800;
+  return cycle <= 0.5 ? cycle * 2 : 2 - cycle * 2;
+}
+
+function frame(timestamp) {
+  const delta = Math.min(0.04, Math.max(0, (timestamp - lastFrame) / 1000));
+  lastFrame = timestamp;
+  advanceMovement(delta, timestamp);
+  if (trainingActive && !reducedMotion.matches) {
+    trainingPointer = pointerAt(timestamp);
+    document.querySelector('[data-training-pointer]').style.left = `${trainingPointer * 100}%`;
+  }
+  updatePlayerVisual();
+  updateCamera();
+  if (state.phase === 'morning') updateProximity();
+  requestAnimationFrame(frame);
+}
+
+function goToNextDay() {
+  const previousDay = state.dayIndex;
+  const previousChapter = state.chapterComplete;
+  state = advanceDay(state);
+  const successful = state.dayIndex !== previousDay || state.chapterComplete !== previousChapter;
+  showToast(state.journal.at(-1)?.text);
+  if (state.dayIndex !== previousDay) {
+    position = { ...START_POSITION };
+    destination = null;
+    pendingInteraction = null;
+    speech.hidden = true;
+    notes.hidden = true;
+    prompt.hidden = false;
+  }
+  if (successful) persist();
+  render();
+  fitWorld();
+}
+
+function resetGame() {
+  clearSave(localStorage);
+  state = createGameState();
+  position = { ...START_POSITION };
+  destination = null;
+  pendingInteraction = null;
+  trainingActive = false;
+  trainingSession = null;
+  trainingFeedback = '';
+  hasStarted = true;
+  newGameArmed = false;
+  chapterResetArmed = false;
+  speech.hidden = true;
+  notes.hidden = true;
+  toastHost.replaceChildren();
+  prompt.hidden = false;
+  document.querySelector('[data-new-game]').textContent = '重新开始';
+  document.querySelector('[data-chapter-restart]').textContent = '从抵达那天重新开始';
+  render();
+  fitWorld();
+}
+
+document.querySelectorAll('[data-object]').forEach(button => {
+  button.addEventListener('click', event => {
+    event.stopPropagation();
+    walkToObject(button.dataset.object);
+  });
+});
+
+plane.addEventListener('click', event => {
+  if (!hasStarted || trainingActive || state.phase !== 'morning' || event.target.closest('[data-object]')) return;
+  const rect = plane.getBoundingClientRect();
+  const point = {
+    x: (event.clientX - rect.left) / rect.width * 100,
+    y: (event.clientY - rect.top) / rect.height * 100
+  };
+  if (canStand(point.x, point.y)) {
+    destination = point;
+    pendingInteraction = null;
+  } else {
+    showToast('那边过不去，沿着场边的小路走。');
+  }
+});
+
+document.querySelectorAll('[data-recipe]').forEach(button => {
+  button.addEventListener('click', () => {
+    const served = applyTransition(
+      current => serveOrder(current, button.dataset.recipe),
+      (before, after) => after.ordersServed > before.ordersServed
+    );
+    if (served && state.phase === 'shop') {
+      showSpeech(currentOrders()[state.ordersServed].customer, '轮到我了吗？不用着急。', { x: 70, y: 35 }, 1900);
+    }
+  });
+});
+
+document.querySelectorAll('[data-repair]').forEach(button => {
+  button.addEventListener('click', () => {
+    applyTransition(
+      current => buyRepair(current, button.dataset.repair),
+      (before, after) => after.repairs.length > before.repairs.length
+    );
+  });
+});
+
+document.querySelector('[data-save-money]').addEventListener('click', () => {
+  applyTransition(
+    chooseSaveMoney,
+    (before, after) => before.eveningChoice !== after.eveningChoice
+  );
+});
+
+document.querySelector('[data-finish-day]').addEventListener('click', () => {
+  applyTransition(finishDay, (before, after) => before.phase !== after.phase);
+});
+
+document.querySelector('[data-next-day]').addEventListener('click', goToNextDay);
+
+document.querySelector('[data-continue]').addEventListener('click', () => {
+  hasStarted = true;
+  persist();
+  render();
+  viewport.focus();
+});
+
+document.querySelector('[data-new-game]').addEventListener('click', event => {
+  if (!newGameArmed) {
+    newGameArmed = true;
+    event.currentTarget.textContent = '确认重新开始';
+    return;
+  }
+  resetGame();
+});
+
+document.querySelector('[data-chapter-restart]').addEventListener('click', event => {
+  if (!chapterResetArmed) {
+    chapterResetArmed = true;
+    event.currentTarget.textContent = '确认从春 12 日开始';
+    return;
+  }
+  resetGame();
+});
+
+document.querySelector('[data-shoot]').addEventListener('click', () => resolveTrainingShot());
+document.querySelector('[data-training-track]').addEventListener('pointerdown', event => {
+  const rect = event.currentTarget.getBoundingClientRect();
+  trainingPointer = clamp((event.clientX - rect.left) / rect.width, 0, 1);
+  renderTraining();
+});
+
+function toggleNotes(force) {
+  notes.hidden = typeof force === 'boolean' ? !force : !notes.hidden;
+}
+
+document.querySelector('[data-notes-toggle]').addEventListener('click', () => toggleNotes());
+document.querySelector('[data-notes-close]').addEventListener('click', () => { notes.hidden = true; });
+
+document.querySelectorAll('[data-move]').forEach(button => {
+  const key = button.dataset.move;
+  button.addEventListener('pointerdown', event => {
+    event.preventDefault();
+    destination = null;
+    pendingInteraction = null;
+    pressedKeys.add(key);
+    button.setPointerCapture?.(event.pointerId);
+  });
+  const release = () => pressedKeys.delete(key);
+  button.addEventListener('pointerup', release);
+  button.addEventListener('pointercancel', release);
+  button.addEventListener('lostpointercapture', release);
+});
+
+touchAction.addEventListener('click', interactNearest);
+
+document.addEventListener('keydown', event => {
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName) || event.target.isContentEditable) return;
+  const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+
+  if (trainingActive) {
+    if (reducedMotion.matches && ['ArrowLeft', 'ArrowRight'].includes(key)) {
+      event.preventDefault();
+      trainingPointer = clamp(trainingPointer + (key === 'ArrowLeft' ? -0.06 : 0.06), 0, 1);
+      renderTraining();
+    }
+    if ((key === 'e' || key === ' ') && !event.repeat) {
+      event.preventDefault();
+      resolveTrainingShot();
+    }
+    return;
+  }
+
+  if (['w', 'a', 's', 'd', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight'].includes(key)) {
+    event.preventDefault();
+    pressedKeys.add(key);
+  }
+  if (key === 'e' && !event.repeat) {
+    event.preventDefault();
+    interactNearest();
+  }
+  if (key === 'j' && !event.repeat) {
+    event.preventDefault();
+    toggleNotes();
+  }
+});
+
+document.addEventListener('keyup', event => {
+  const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+  pressedKeys.delete(key);
+});
+
+window.addEventListener('blur', () => pressedKeys.clear());
+window.addEventListener('resize', fitWorld);
+
+window.__integratedDayDebug = {
+  getState: () => structuredClone(state),
+  getPosition: () => ({ ...position }),
+  walkToObject,
+  interact,
+  shootAt: value => resolveTrainingShot(value),
+  isMoving: () => moving || Boolean(destination),
+  hasSave: () => loadSave(localStorage).ok,
+  clearProjectSave: () => clearSave(localStorage)
+};
+
+fitWorld();
+render();
+requestAnimationFrame(frame);

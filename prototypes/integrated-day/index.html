@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#14221b">
+  <title>海风球场：安若童的三天</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="game" data-phase="morning">
+    <section class="viewport" data-scene tabindex="0" aria-label="海风球场，可用方向键或 W A S D 移动">
+      <div class="world-plane" data-world-plane>
+        <img class="world-map" src="./assets/seaside-club-handpainted-v4.png" alt="手绘儿童动画风格的海边社区足球场、俱乐部、看台与场边小店">
+        <div class="light-layer" aria-hidden="true"></div>
+        <div class="water-glint" aria-hidden="true"></div>
+        <div class="wind-layer" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+
+        <div class="repair-mark repair-net" data-repair-visual="net" hidden aria-hidden="true">
+          <span class="item-sprite item-net"></span>
+        </div>
+        <div class="repair-mark repair-awning" data-repair-visual="awning" hidden aria-hidden="true">
+          <span class="item-sprite item-awning"></span>
+        </div>
+        <div class="repair-mark repair-bleachers" data-repair-visual="bleachers" hidden aria-hidden="true">
+          <span class="item-sprite item-planks"></span>
+        </div>
+
+        <div class="morning-layer" data-morning-layer>
+          <button class="world-target gather-target" data-object="tea-a" style="--x:28%;--y:85%" aria-label="入口花槽里的海岸茶草">
+            <span class="target-ring"></span><span class="item-sprite item-tea"></span>
+          </button>
+          <button class="world-target gather-target" data-object="tea-b" style="--x:62%;--y:78%" aria-label="球场围网边的海岸茶草">
+            <span class="target-ring"></span><span class="item-sprite item-tea"></span>
+          </button>
+          <button class="world-target gather-target" data-object="fruit-a" style="--x:82%;--y:32%" aria-label="小店旁刚送来的果子">
+            <span class="target-ring"></span><span class="item-sprite item-fruit"></span>
+          </button>
+          <button class="world-target gather-target" data-object="fruit-b" style="--x:16%;--y:85%" aria-label="自行车架旁的果子">
+            <span class="target-ring"></span><span class="item-sprite item-fruit"></span>
+          </button>
+
+          <button class="world-target npc-target" data-object="coach" style="--x:55%;--y:55%" aria-label="和郭教练说话">
+            <span class="actor-shadow"></span>
+            <span class="npc-sprite npc-guo"></span>
+            <span class="world-name">郭教练</span>
+          </button>
+
+          <button class="world-target shop-target" data-object="shop" data-open-shop style="--x:73%;--y:31%" aria-label="走到场边小店">
+            <span class="target-ring"></span>
+            <span class="shop-sign" data-door-label>场边小店</span>
+          </button>
+        </div>
+
+        <div class="shop-actors" data-shop-actors hidden aria-hidden="true">
+          <div class="world-npc current-customer" style="--x:73%;--y:42%">
+            <span class="actor-shadow"></span><span class="npc-sprite" data-customer-sprite></span>
+          </div>
+          <div class="world-npc queue-one" style="--x:68%;--y:43%">
+            <span class="actor-shadow"></span><span class="npc-sprite npc-sumi"></span>
+          </div>
+          <div class="world-npc queue-two" style="--x:63%;--y:44%">
+            <span class="actor-shadow"></span><span class="npc-sprite npc-qiaoqiao"></span>
+          </div>
+        </div>
+
+        <div class="player-actor" data-player data-direction="down" data-frame="0" aria-label="安若童">
+          <span class="actor-shadow"></span>
+          <span class="player-sprite"></span>
+        </div>
+
+        <div class="speech-bubble" data-speech hidden>
+          <strong data-speech-name></strong>
+          <span data-speech-copy></span>
+        </div>
+      </div>
+
+      <header class="hud-top" aria-label="今日状态">
+        <div class="day-dial">
+          <span data-date>春 12</span>
+          <strong data-time>09:10</strong>
+          <small data-weather>海风转晴</small>
+        </div>
+        <div class="objective-note">
+          <span data-phase-title>自由的上午</span>
+          <strong data-current-goal>沿海边球场走走，准备下午开店的东西。</strong>
+          <button class="notes-toggle" data-notes-toggle type="button">今日记录 <kbd>J</kbd></button>
+        </div>
+      </header>
+
+      <aside class="field-notes" data-notes hidden aria-label="今日记录">
+        <div class="notes-heading">
+          <div><span>安若童</span><strong>今天不用赶时间</strong></div>
+          <button data-notes-close type="button" aria-label="收起今日记录">收起</button>
+        </div>
+        <ol class="phase-track" aria-label="今天的阶段">
+          <li data-phase-step="morning" class="active"><span>上午</span><strong>沿场走走</strong></li>
+          <li data-phase-step="shop"><span>下午</span><strong>开一会儿店</strong></li>
+          <li data-phase-step="evening"><span>傍晚</span><strong>留下一处变化</strong></li>
+          <li data-phase-step="complete"><span>夜晚</span><strong>回屋休息</strong></li>
+        </ol>
+        <div class="relationship-note" data-optional-event>
+          <span>场上的人</span>
+          <strong data-relationship-status>还没有和郭教练说话</strong>
+          <small>这件事可以留到明天。</small>
+        </div>
+        <ol class="journal-log" data-journal-log></ol>
+        <div class="history-log" data-history-log hidden></div>
+      </aside>
+
+      <section class="counter-panel" data-shop hidden aria-label="场边小店柜台">
+        <div class="customer-request">
+          <span>下一位</span>
+          <strong data-customer-name>林川</strong>
+          <p data-order-copy>练完了，想喝一杯青草茶。</p>
+        </div>
+        <div class="recipe-strip">
+          <button data-recipe="tea" type="button">
+            <span class="item-sprite item-cup"></span><strong>青草茶</strong><small>茶 1 · 水 1</small>
+          </button>
+          <button data-recipe="fruit" type="button">
+            <span class="item-sprite item-bottle"></span><strong>果子水</strong><small>果 1 · 水 1</small>
+          </button>
+          <button data-recipe="towel" type="button">
+            <span class="item-sprite item-towel"></span><strong>干净毛巾</strong><small>布 1</small>
+          </button>
+        </div>
+      </section>
+
+      <section class="repair-panel" data-repairs hidden aria-label="选择场地修缮">
+        <div class="repair-heading">
+          <span>收店以后</span><strong>把今天挣到的钱留在场地里</strong>
+        </div>
+        <div class="repair-options">
+          <button data-repair="net" type="button">
+            <span class="item-sprite item-net"></span><strong>新球网</strong><small>24 元</small>
+          </button>
+          <button data-repair="awning" type="button">
+            <span class="item-sprite item-awning"></span><strong>补遮雨棚</strong><small>18 元</small>
+          </button>
+          <button data-repair="bleachers" type="button">
+            <span class="item-sprite item-planks"></span><strong>修旧看台</strong><small>28 元</small>
+          </button>
+        </div>
+        <button class="save-money" data-save-money type="button">今天先存下</button>
+        <button class="end-day" data-finish-day disabled type="button">回屋休息</button>
+      </section>
+
+      <section class="training-layer" data-training hidden aria-label="三脚射门训练">
+        <div class="training-copy">
+          <span>郭教练的三脚训练</span>
+          <strong data-training-count>第 1 脚</strong>
+          <small data-training-score>现在 0 分</small>
+        </div>
+        <div class="training-goal" aria-hidden="true">
+          <i class="goal-target" data-training-target></i>
+        </div>
+        <button class="power-track" data-training-track type="button" aria-label="选择射门力度">
+          <i data-training-zone></i><b data-training-pointer></b>
+        </button>
+        <button class="shoot-button" data-shoot type="button">射门 <kbd>E</kbd></button>
+      </section>
+
+      <div class="interaction-prompt" data-prompt>
+        <kbd>WASD</kbd><span>走动</span><kbd>E</kbd><span>互动</span><small>也可以点击要去的地方</small>
+      </div>
+
+      <div class="hotbar" aria-label="随身物品">
+        <div class="hotbar-slot"><span class="item-sprite item-tea"></span><small>茶</small><strong data-inventory="tea">0</strong></div>
+        <div class="hotbar-slot"><span class="item-sprite item-fruit"></span><small>果</small><strong data-inventory="fruit">0</strong></div>
+        <div class="hotbar-slot"><span class="item-sprite item-towel"></span><small>布</small><strong data-inventory="cloth">2</strong></div>
+        <div class="hotbar-slot"><span class="item-sprite item-bottle"></span><small>水</small><strong data-inventory="water">4</strong></div>
+        <div class="money-slot"><span class="item-sprite item-coins"></span><strong data-resource-value>100</strong><small data-resource-label>体力</small></div>
+      </div>
+
+      <div class="toast-host" data-toast-host aria-live="polite"></div>
+
+      <div class="touch-controls" aria-label="移动控制">
+        <button data-move="w" type="button" aria-label="向上">▲</button>
+        <button data-move="a" type="button" aria-label="向左">◀</button>
+        <button data-move="s" type="button" aria-label="向下">▼</button>
+        <button data-move="d" type="button" aria-label="向右">▶</button>
+      </div>
+      <button class="touch-action" data-action type="button" aria-label="互动">E</button>
+
+      <div class="summary-dim" data-summary-dim hidden></div>
+      <section class="day-summary" data-summary hidden role="dialog" aria-modal="true" aria-label="一天结束">
+        <span data-summary-date>春 12 · 晚间</span>
+        <h1 data-summary-title>今天留下了痕迹</h1>
+        <p data-summary-copy></p>
+        <div class="summary-grid">
+          <div><span>接待</span><strong data-summary-orders>4 人</strong></div>
+          <div><span>场地</span><strong data-summary-repair>遮雨棚</strong></div>
+          <div><span>余下</span><strong data-summary-money>20 元</strong></div>
+          <div><span>认识</span><strong data-summary-person>留到明天</strong></div>
+        </div>
+        <button data-next-day type="button">去往春 13 日</button>
+      </section>
+
+      <section class="chapter-summary" data-chapter-summary hidden role="dialog" aria-modal="true" aria-label="三日记录">
+        <span>海风球场 · 第一章</span>
+        <h1>下周，你还会来吗？</h1>
+        <p>三天前，大家以为安若童是来让球场关门的。现在，他们在友谊赛散场后给她留了一把小店钥匙。</p>
+        <div class="chapter-history" data-chapter-history></div>
+        <strong class="chapter-invitation">郭教练：下周训练还是九点。你要是来，就顺手把门打开。</strong>
+        <button data-chapter-restart type="button">从抵达那天重新开始</button>
+      </section>
+
+      <section class="start-card" data-start-card hidden aria-label="海风球场存档">
+        <span>安若童的三天</span>
+        <h1>海风球场</h1>
+        <p data-save-summary></p>
+        <div>
+          <button data-continue type="button">继续游戏</button>
+          <button data-new-game type="button">重新开始</button>
+        </div>
+      </section>
+    </section>
+  </main>
+  <script type="module" src="./game.js"></script>
+</body>
+</html>
