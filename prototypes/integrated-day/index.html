@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#14221b">
-  <title>海风球场：安若童的三天</title>
+  <title>海风球场：安若童的第一周</title>
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
@@ -91,6 +91,14 @@
         </div>
       </header>
 
+      <div class="management-metrics" data-management-metrics hidden aria-label="本周经营状态">
+        <span><small>现金</small><strong data-metric="cash">0</strong></span>
+        <span><small>球场</small><strong data-metric="facility">48</strong></span>
+        <span><small>凝聚</small><strong data-metric="cohesion">46</strong></span>
+        <span><small>社区</small><strong data-metric="community">52</strong></span>
+        <span><small>委员会</small><strong data-metric="governance">1/5</strong></span>
+      </div>
+
       <aside class="field-notes" data-notes hidden aria-label="今日记录">
         <div class="notes-heading">
           <div><span>安若童</span><strong>今天不用赶时间</strong></div>
@@ -164,6 +172,33 @@
         <button class="shoot-button" data-shoot type="button">射门 <kbd>E</kbd></button>
       </section>
 
+      <section class="decision-panel" data-decision-panel hidden role="dialog" aria-modal="true" aria-label="本日经营决定">
+        <div class="decision-heading">
+          <span data-decision-kicker>今天的决定</span>
+          <button data-decision-close type="button" aria-label="暂时收起决定">暂时收起</button>
+        </div>
+        <h2 data-decision-title></h2>
+        <p data-decision-copy></p>
+        <div class="ledger-preview" data-ledger-preview hidden></div>
+        <div class="decision-options" data-decision-options></div>
+      </section>
+
+      <section class="match-panel" data-match-panel hidden role="dialog" aria-modal="true" aria-label="主场比赛">
+        <div class="match-scoreline">
+          <span>海风球场</span>
+          <strong data-match-score>0 : 0</strong>
+          <span data-match-opponent>客队</span>
+        </div>
+        <div class="match-moment">
+          <small data-match-minute>第 18 分钟</small>
+          <h2 data-match-title>对方第一次压上来了</h2>
+          <p data-match-copy></p>
+        </div>
+        <div class="match-options" data-match-options></div>
+      </section>
+
+      <button class="management-day-control" data-end-management-day hidden type="button">收好今天的决定</button>
+
       <div class="interaction-prompt" data-prompt>
         <kbd>WASD</kbd><span>走动</span><kbd>E</kbd><span>互动</span><small>也可以点击要去的地方</small>
       </div>
@@ -192,10 +227,10 @@
         <h1 data-summary-title>今天留下了痕迹</h1>
         <p data-summary-copy></p>
         <div class="summary-grid">
-          <div><span>接待</span><strong data-summary-orders>4 人</strong></div>
-          <div><span>场地</span><strong data-summary-repair>遮雨棚</strong></div>
-          <div><span>余下</span><strong data-summary-money>20 元</strong></div>
-          <div><span>认识</span><strong data-summary-person>留到明天</strong></div>
+          <div><span data-summary-label="orders">接待</span><strong data-summary-orders>4 人</strong></div>
+          <div><span data-summary-label="repair">场地</span><strong data-summary-repair>遮雨棚</strong></div>
+          <div><span data-summary-label="money">余下</span><strong data-summary-money>20 元</strong></div>
+          <div><span data-summary-label="person">认识</span><strong data-summary-person>留到明天</strong></div>
         </div>
         <button data-next-day type="button">去往春 13 日</button>
       </section>
@@ -206,11 +241,27 @@
         <p>三天前，大家以为安若童是来让球场关门的。现在，他们在友谊赛散场后给她留了一把小店钥匙。</p>
         <div class="chapter-history" data-chapter-history></div>
         <strong class="chapter-invitation">郭教练：下周训练还是九点。你要是来，就顺手把门打开。</strong>
-        <button data-chapter-restart type="button">从抵达那天重新开始</button>
+        <div class="chapter-actions">
+          <button data-begin-week type="button">进入第一个经营周</button>
+          <button data-chapter-restart type="button">从抵达那天重新开始</button>
+        </div>
+      </section>
+
+      <section class="week-summary" data-week-summary hidden role="dialog" aria-modal="true" aria-label="第一周结算">
+        <span>春 15 日至春 21 日</span>
+        <h1 data-week-summary-title>球场撑过了第一周</h1>
+        <p data-week-summary-copy></p>
+        <div class="week-score" data-week-score></div>
+        <div class="week-metrics" data-week-metrics></div>
+        <strong class="week-next">沈峤没有离开。他把一份新的债权文件交给了罗馆长。</strong>
+        <div class="week-actions">
+          <button data-week-walk type="button">继续在球场走走</button>
+          <button data-week-restart type="button">从序章重新开始</button>
+        </div>
       </section>
 
       <section class="start-card" data-start-card hidden aria-label="海风球场存档">
-        <span>安若童的三天</span>
+        <span>安若童的第一周</span>
         <h1>海风球场</h1>
         <p data-save-summary></p>
         <div>

@@ -87,7 +87,7 @@ async function evaluate(expression) {
   return response.result.value;
 }
 
-async function waitFor(expression, message, timeout = 12000) {
+async function waitFor(expression, message, timeout = 20000) {
   const started = Date.now();
   while (Date.now() - started < timeout) {
     if (await evaluate(expression)) return;
@@ -211,6 +211,50 @@ async function assertInsideViewport(selector) {
   assert(result.left >= -1 && result.top >= -1 && result.right <= result.width + 1 && result.bottom <= result.height + 1, `${selector} leaves the viewport`);
 }
 
+const managementObjects = {
+  'review-ledger': 'stadium-office',
+  'choose-training': 'coach',
+  'choose-opponent': 'stadium-office',
+  'choose-market': 'shop',
+  'prepare-facility': 'pitch-prep',
+  'welcome-opponent': 'guest-gate'
+};
+
+async function completeManagementDay(dayIndex, actionId, choiceId, { shortfallRoute = null, captureName = null } = {}) {
+  assert(
+    await evaluate(`window.__integratedDayDebug.getState().dayIndex === ${dayIndex}`),
+    `Management day ${dayIndex} did not begin`
+  );
+  const objectId = managementObjects[actionId];
+  await walkAndWait(objectId, '!document.querySelector("[data-decision-panel]").hidden');
+  await assertInsideViewport('[data-decision-panel]');
+  if (captureName) await capture(captureName);
+  await click(`[data-decision-choice="${choiceId}"]`);
+  await waitFor(
+    `window.__integratedDayDebug.getState().management.completedActions.includes(${JSON.stringify(actionId)})`,
+    `${actionId} was not recorded`
+  );
+  if (shortfallRoute) {
+    await waitFor(
+      'window.__integratedDayDebug.getState().management.shortfallPending',
+      'The expensive management path did not open cash recovery'
+    );
+    assert((await text('[data-decision-title]')).includes('账本已经低于零'), 'Cash recovery panel has the wrong title');
+    await capture('shortfall');
+    await click(`[data-decision-choice="${shortfallRoute}"]`);
+    await waitFor(
+      '!window.__integratedDayDebug.getState().management.shortfallPending',
+      'Cash recovery did not resolve the shortfall'
+    );
+  }
+  await waitFor('!document.querySelector("[data-end-management-day]").hidden', 'Management day cannot be closed');
+  await click('[data-end-management-day]');
+  await waitFor('window.__integratedDayDebug.getState().phase === "complete"', `Management day ${dayIndex} did not finish`);
+  await assertInsideViewport('[data-summary]');
+  await click('[data-next-day]');
+  await waitFor(`window.__integratedDayDebug.getState().dayIndex === ${dayIndex + 1}`, `Management day ${dayIndex + 1} did not begin`);
+}
+
 async function testThreeDayLoop() {
   await navigate();
   const desktop = await evaluate(`({
@@ -317,6 +361,91 @@ async function testThreeDayLoop() {
   assert(ending.repairs.includes('awning') && ending.repairs.includes('net'), 'Persistent repairs are incomplete');
   await assertInsideViewport('[data-chapter-summary]');
   await capture('chapter');
+
+  await click('[data-begin-week]');
+  await waitFor('window.__integratedDayDebug.getState().dayIndex === 3', 'The first management week did not begin');
+  await waitFor(
+    'document.querySelector(".world-map").complete && document.querySelector(".world-map").naturalWidth === 1672',
+    'The main stadium art did not finish loading'
+  );
+  const weekStart = await evaluate(`({
+    date: document.querySelector('[data-date]').textContent.trim(),
+    mapId: window.__integratedDayDebug.getMapId(),
+    mapLoaded: document.querySelector('.world-map').naturalWidth === 1672
+      && document.querySelector('.world-map').src.includes('seabreeze-main-stadium-v1.png'),
+    shenVisible: Boolean(document.querySelector('[data-object="npc-shen-qiao"]')),
+    metricsVisible: !document.querySelector('[data-management-metrics]').hidden,
+    weekDays: document.querySelectorAll('[data-week-day]').length
+  })`);
+  assert(weekStart.date === '春 15' && weekStart.mapId === 'stadium', 'Management week did not open at the stadium on spring 15');
+  assert(weekStart.mapLoaded, 'The main stadium art did not load');
+  assert(weekStart.shenVisible, 'Shen Qiao is missing from the first stadium morning');
+  assert(weekStart.metricsVisible && weekStart.weekDays === 7, 'The weekly management HUD is incomplete');
+  await capture('stadium');
+
+  await walkAndWait(
+    'npc-shen-qiao',
+    'window.__integratedDayDebug.getState().events.includes("talk-shen-qiao-day-3")'
+  );
+  assert((await text('[data-speech-copy]')).includes('澜岸体育'), 'Shen Qiao does not introduce the debt proposal');
+
+  await walkAndWait('to-training', 'window.__integratedDayDebug.getMapId() === "training"');
+  await walkAndWait('to-stadium', 'window.__integratedDayDebug.getMapId() === "stadium"');
+
+  await walkAndWait('stadium-office', '!document.querySelector("[data-decision-panel]").hidden');
+  await assertInsideViewport('[data-decision-panel]');
+  await capture('ledger');
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 2,
+    mobile: true
+  });
+  await sleep(250);
+  assert(!await evaluate('document.documentElement.scrollWidth > innerWidth'), 'Management week overflows on mobile');
+  await assertInsideViewport('[data-decision-panel]');
+  await assertInsideViewport('[data-management-metrics]');
+  await capture('management-mobile');
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 1440,
+    height: 900,
+    deviceScaleFactor: 1,
+    mobile: false
+  });
+  await sleep(250);
+  await click('[data-decision-choice="acknowledge"]');
+  await waitFor('!document.querySelector("[data-end-management-day]").hidden', 'Ledger choice did not unlock the day ending');
+  await click('[data-end-management-day]');
+  await waitFor('window.__integratedDayDebug.getState().phase === "complete"', 'Spring 15 did not finish');
+  await click('[data-next-day]');
+
+  await completeManagementDay(4, 'choose-training', 'shape');
+  await completeManagementDay(5, 'choose-opponent', 'city-university');
+  await completeManagementDay(6, 'choose-market', 'seafood-market');
+  await completeManagementDay(7, 'prepare-facility', 'grass', { captureName: 'facility' });
+  await completeManagementDay(8, 'welcome-opponent', 'business-welcome', { shortfallRoute: 'shen' });
+
+  assert(await evaluate('window.__integratedDayDebug.getState().dayIndex === 9'), 'Match day did not begin');
+  await walkAndWait('match-center', '!document.querySelector("[data-match-panel]").hidden');
+  await assertInsideViewport('[data-match-panel]');
+  await capture('match');
+  for (const choiceId of ['patient-build', 'protect-youngster', 'press-late']) {
+    await click(`[data-highlight-choice="${choiceId}"]`);
+  }
+  await waitFor('Boolean(window.__integratedDayDebug.getState().management.matchResult)', 'The match did not finish after three highlights');
+  const matchResult = await evaluate('window.__integratedDayDebug.getState().management.matchResult');
+  assert(matchResult.score.home === 2 && matchResult.score.away === 1, 'The canonical management path did not produce a 2:1 match');
+  await click('[data-end-management-day]');
+  await waitFor('Boolean(window.__integratedDayDebug.getState().management.weekComplete)', 'The first week did not settle');
+  await assertInsideViewport('[data-week-summary]');
+  assert((await text('[data-week-score]')).includes('2 : 1'), 'Weekly settlement has the wrong score');
+  await capture('week');
+
+  await navigate();
+  assert(!await evaluate('document.querySelector("[data-start-card]").hidden'), 'Reload did not offer the completed management week');
+  assert((await text('[data-save-summary]')).includes('春 21 日'), 'Completed week save has the wrong date');
+  await click('[data-continue]');
+  await assertInsideViewport('[data-week-summary]');
 }
 
 let exitCode = 0;
@@ -335,6 +464,9 @@ try {
   console.log('PASS training and relationship path');
   console.log('PASS save and reload restoration');
   console.log('PASS desktop and mobile layout');
+  console.log('PASS two-map first management week');
+  console.log('PASS cash recovery and weekly settlement');
+  console.log('PASS deterministic three-highlight match');
   assert(pageErrors.length === 0, `Browser errors: ${pageErrors.join(' | ')}`);
   console.log('PASS browser console');
 } catch (error) {

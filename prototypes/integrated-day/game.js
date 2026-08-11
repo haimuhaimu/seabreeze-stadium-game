@@ -3,6 +3,8 @@ import { getCampaignDay, getRequiredAction, isPrologueDay, isManagementWeekDay }
 import {
   GATHERABLES,
   REPAIRS,
+  MARKET_PLANS,
+  WELCOME_PLANS,
   createGameState,
   collectItem,
   talkToCoach,
@@ -14,12 +16,23 @@ import {
   chooseSaveMoney,
   finishDay,
   advanceDay,
+  beginManagementWeek,
+  completeRequiredAction,
+  resolveManagementShortfall,
+  startWeeklyMatch,
+  chooseMatchHighlight,
+  finishManagementDay,
+  advanceCampaignDay,
   recordNpcConversation
 } from './game-state.js';
 import { loadSave, writeSave, clearSave } from './save-game.js';
 import { TRAINING_TARGETS, createTrainingSession, takeShot } from './training-game.js';
 import { getMap, getMapObjects, canStandOnMap } from './world-content.js';
 import { getNpcSchedule } from './npc-schedules.js';
+import { OPPONENTS, getOpponent } from './opponent-content.js';
+import { FACILITY_PLANS } from './facility-state.js';
+import { TRAINING_FOCUS } from './roster-state.js';
+import { HIGHLIGHTS } from './match-engine.js';
 
 const root = document.querySelector('.game');
 const viewport = document.querySelector('[data-scene]');
@@ -39,6 +52,9 @@ const summary = document.querySelector('[data-summary]');
 const chapterSummary = document.querySelector('[data-chapter-summary]');
 const startCard = document.querySelector('[data-start-card]');
 const trainingLayer = document.querySelector('[data-training]');
+const decisionPanel = document.querySelector('[data-decision-panel]');
+const matchPanel = document.querySelector('[data-match-panel]');
+const weekSummary = document.querySelector('[data-week-summary]');
 const summaryDim = document.querySelector('[data-summary-dim]');
 const resourceIcon = document.querySelector('.money-slot .item-sprite');
 const touchControls = document.querySelector('.touch-controls');
@@ -66,6 +82,7 @@ let worldObjects = {};
 let hasStarted = loaded.reason === 'absent';
 let destination = null;
 let pendingInteraction = null;
+let movementRoute = [];
 let toastTimer = 0;
 let speechTimer = 0;
 let lastFrame = performance.now();
@@ -78,6 +95,9 @@ let trainingPointer = 0.5;
 let trainingFeedback = '';
 let newGameArmed = false;
 let chapterResetArmed = false;
+let weekResetArmed = false;
+let decisionAction = null;
+let weekSummaryDismissed = false;
 const pressedKeys = new Set();
 
 function currentDay() {
@@ -96,6 +116,16 @@ const MAINLINE_OBJECTS = Object.freeze({
   'prepare-facility': 'pitch-prep',
   'welcome-opponent': 'guest-gate',
   'play-match': 'match-center'
+});
+
+const ACTION_COPY = Object.freeze({
+  'review-ledger': { title: '账本上的缺口', goal: '去主赛场办公室看本周账本。沈峤正在等你。' },
+  'choose-training': { title: '谁能上场', goal: '到旧训练场决定本周训练重点。' },
+  'choose-opponent': { title: '邀请谁来', goal: '去主赛场办公室确认第一支外队。' },
+  'choose-market': { title: '看台之外', goal: '回场边小店安排周末集市。' },
+  'prepare-facility': { title: '比赛前夜', goal: '在主赛场决定本周最重要的设施准备。' },
+  'welcome-opponent': { title: '客队抵达', goal: '去主赛场客队通道完成接待。' },
+  'play-match': { title: '第一场主场周赛', goal: '走到草场边，开始今天的比赛。' }
 });
 
 function rebuildWorldObjects() {
@@ -127,11 +157,22 @@ function rebuildWorldObjects() {
     ? getNpcSchedule(state.dayIndex, state.phase, { opponentId: state.management.opponentId })
     : [];
   for (const npc of schedules.filter(item => item.mapId === activeMapId)) {
+    const guestSide = activeMapId === 'stadium' && npc.x < 15 && npc.y < 50;
+    const stadiumApproach = guestSide
+      ? { x: 4, y: Math.min(52, npc.y + 7) }
+      : { x: npc.x, y: 68 };
     objects[`npc-${npc.id}`] = {
       id: `npc-${npc.id}`,
       x: npc.x,
       y: npc.y,
-      approach: { x: npc.x, y: Math.min(94, npc.y + 8) },
+      approach: activeMapId === 'stadium'
+        ? stadiumApproach
+        : { x: npc.x, y: Math.min(94, npc.y + 8) },
+      route: activeMapId !== 'stadium'
+        ? []
+        : guestSide
+          ? [{ x: 30, y: 68 }, { x: 4, y: 68 }]
+          : [{ x: 84, y: 88 }, { x: 84, y: 68 }],
       kind: 'npc',
       label: `和${npc.name}说话`,
       npc
@@ -246,6 +287,24 @@ function inventoryShortageCopy() {
 }
 
 function phaseDetails() {
+  if (isManagementWeekDay(state.dayIndex)) {
+    const actionId = getRequiredAction(state.dayIndex);
+    const action = ACTION_COPY[actionId];
+    const completed = state.management.completedActions.includes(actionId);
+    return {
+      title: state.management.weekComplete ? '第一周已经结算' : state.phase === 'complete' ? '今天的决定已经记下' : action.title,
+      goal: state.management.weekComplete
+        ? '可以继续在球场走走。这一周的结果已经保存。'
+        : state.phase === 'complete'
+        ? state.dayIndex === 9 ? '这一周已经结算。' : '今天已经结束，可以去往下一天。'
+        : completed
+          ? '决定已经完成。准备好以后，收好今天的记录。'
+          : action.goal,
+      label: '现金',
+      value: `${state.economy.cash}元`,
+      icon: 'item-coins'
+    };
+  }
   if (state.phase === 'morning') {
     const trainingHint = currentDay().trainingAvailable && !state.training.completedToday
       ? ' 郭教练也在等你踢三脚。'
@@ -295,6 +354,34 @@ function renderCalendar() {
 }
 
 function renderPhases() {
+  const track = document.querySelector('.phase-track');
+  if (isManagementWeekDay(state.dayIndex)) {
+    if (track.dataset.mode !== 'week') {
+      track.dataset.mode = 'week';
+      track.classList.add('week-track');
+      track.innerHTML = Array.from({ length: 7 }, (_, offset) => {
+        const day = getCampaignDay(offset + 3);
+        return `<li data-week-day="${offset + 3}"><span>${day.weekday}</span><strong>${day.date}日</strong></li>`;
+      }).join('');
+    }
+    track.querySelectorAll('[data-week-day]').forEach(step => {
+      const dayIndex = Number(step.dataset.weekDay);
+      step.classList.toggle('active', dayIndex === state.dayIndex);
+      step.classList.toggle('done', dayIndex < state.dayIndex || (dayIndex === state.dayIndex && state.phase === 'complete'));
+    });
+    return;
+  }
+
+  if (track.dataset.mode === 'week') {
+    track.dataset.mode = 'day';
+    track.classList.remove('week-track');
+    track.innerHTML = [
+      ['morning', '上午', '沿场走走'],
+      ['shop', '下午', '开一会儿店'],
+      ['evening', '傍晚', '留下一处变化'],
+      ['complete', '夜晚', '回屋休息']
+    ].map(([phase, label, copy]) => `<li data-phase-step="${phase}"><span>${label}</span><strong>${copy}</strong></li>`).join('');
+  }
   const order = ['morning', 'shop', 'evening', 'complete'];
   const currentIndex = order.indexOf(state.phase);
   document.querySelectorAll('[data-phase-step]').forEach(step => {
@@ -453,18 +540,202 @@ function renderRepairs() {
   document.querySelector('[data-finish-day]').disabled = !state.eveningChoice;
 
   document.querySelectorAll('[data-repair-visual]').forEach(visual => {
-    visual.hidden = !state.repairs.includes(visual.dataset.repairVisual);
+    visual.hidden = activeMapId !== 'training' || !state.repairs.includes(visual.dataset.repairVisual);
   });
 }
 
+function choiceLabel(actionId, choiceId) {
+  if (actionId === 'review-ledger') return '确认本周账本';
+  if (actionId === 'choose-training') return TRAINING_FOCUS[choiceId]?.label ?? choiceId;
+  if (actionId === 'choose-opponent') return OPPONENTS[choiceId]?.name ?? choiceId;
+  if (actionId === 'choose-market') return MARKET_PLANS[choiceId]?.label ?? choiceId;
+  if (actionId === 'prepare-facility') return FACILITY_PLANS[choiceId]?.label ?? choiceId;
+  if (actionId === 'welcome-opponent') return WELCOME_PLANS[choiceId]?.label ?? choiceId;
+  if (actionId === 'play-match') return '完成主场比赛';
+  return choiceId;
+}
+
+function getDecisionConfig(actionId) {
+  if (actionId === 'review-ledger') {
+    return {
+      kicker: '春 15 日 / 主赛场办公室',
+      title: '先承认账本里的缺口',
+      copy: '社区预约金暂时补上了周转，但工资和维护已经先到期。沈峤提出由澜岸体育承担后续债务。',
+      options: [{ id: 'acknowledge', label: '把账本签下来', detail: '委员会支持 +1 / 沈峤正式提出合作' }]
+    };
+  }
+  if (actionId === 'choose-training') {
+    return {
+      kicker: '春 16 日 / 旧训练场',
+      title: '这周首先练什么',
+      copy: '一次训练不可能解决所有问题。你的选择也会告诉球员，谁的风险更值得承担。',
+      options: [
+        { id: 'pressing', label: '前场压迫', detail: '进攻 +6 / 伤病风险 +2' },
+        { id: 'shape', label: '整体站位', detail: '防守 +5 / 凝聚 +2' },
+        { id: 'youth', label: '给年轻人机会', detail: '凝聚 +3 / 小满信任 +2' }
+      ]
+    };
+  }
+  if (actionId === 'choose-opponent') {
+    return {
+      kicker: '春 17 日 / 外队邀请',
+      title: '第一场周赛邀请谁',
+      copy: '强队会带来更多观众，也会放大接待成本和球队差距。',
+      options: Object.values(OPPONENTS).map(opponent => ({
+        id: opponent.id,
+        label: opponent.name,
+        detail: `${opponent.cost}元 / 预计${opponent.expectedAudience}人 / ${opponent.style}`
+      }))
+    };
+  }
+  if (actionId === 'choose-market') {
+    return {
+      kicker: '春 18 日 / 场边小店',
+      title: '比赛以外，留下什么',
+      copy: '周末的热闹需要有人愿意提前来，也需要球场愿意为社区让出位置。',
+      options: Object.entries(MARKET_PLANS).map(([id, plan]) => ({
+        id,
+        label: plan.label,
+        detail: `${plan.cost}元 / 观众 +${plan.audience} / 社区 +${plan.community}`
+      }))
+    };
+  }
+  if (actionId === 'prepare-facility') {
+    return {
+      kicker: '春 19 日 / 主赛场',
+      title: '钱只能先花在一处',
+      copy: '灯光、看台和草皮都需要修。周日会直接看出你先保护了谁。',
+      options: Object.entries(FACILITY_PLANS).map(([id, plan]) => ({
+        id,
+        label: plan.label,
+        detail: `${plan.cost}元 / 球场 +${plan.condition} / 观众 +${plan.audience || 0}`
+      }))
+    };
+  }
+  if (actionId === 'welcome-opponent') {
+    return {
+      kicker: '春 20 日 / 客队通道',
+      title: '用什么方式迎接客队',
+      copy: '正式流程让评审看见专业，社区迎接则让比赛先成为大家的事。',
+      options: Object.entries(WELCOME_PLANS).map(([id, plan]) => ({
+        id,
+        label: plan.label,
+        detail: `${plan.cost}元 / 观众 +${plan.audience} / 社区 +${plan.community}`
+      }))
+    };
+  }
+  if (actionId === 'resolve-shortfall') {
+    return {
+      kicker: '现金周转',
+      title: '账本已经低于零',
+      copy: '球场不会立刻关门，但这次缺口必须由某个人承担。',
+      options: [
+        { id: 'delay', label: '延迟一项支出', detail: '现金回到 0 / 郭教练信任 -1' },
+        { id: 'community', label: '请求社区短期援助', detail: '现金回到 0 / 社区支持 -6' },
+        { id: 'shen', label: '接受沈峤过桥资金', detail: '现金回到 0 / 沈峤影响 +1' }
+      ]
+    };
+  }
+  return null;
+}
+
+function renderDecisionPanel() {
+  const config = decisionAction && decisionAction !== 'play-match' ? getDecisionConfig(decisionAction) : null;
+  decisionPanel.hidden = !config;
+  if (!config) return;
+  document.querySelector('[data-decision-kicker]').textContent = config.kicker;
+  document.querySelector('[data-decision-title]').textContent = config.title;
+  document.querySelector('[data-decision-copy]').textContent = config.copy;
+  const ledger = document.querySelector('[data-ledger-preview]');
+  ledger.hidden = decisionAction !== 'review-ledger';
+  ledger.innerHTML = decisionAction === 'review-ledger'
+    ? state.economy.entries.map(entry => `<div><span>${entry.label}</span><strong>${entry.amount > 0 ? '+' : ''}${entry.amount} 元</strong></div>`).join('')
+      + `<div><span>现在可用</span><strong>${state.economy.cash} 元</strong></div>`
+    : '';
+  document.querySelector('[data-decision-close]').hidden = decisionAction === 'resolve-shortfall';
+  document.querySelector('[data-decision-options]').innerHTML = config.options.map(option => (
+    `<button type="button" data-decision-choice="${option.id}"><strong>${option.label}</strong><small>${option.detail}</small></button>`
+  )).join('');
+}
+
+function renderMatchPanel() {
+  const match = state.management?.match;
+  const active = decisionAction === 'play-match' && match && !state.management.matchResult;
+  matchPanel.hidden = !active;
+  if (!active) return;
+  const opponent = getOpponent(state.management.opponentId);
+  document.querySelector('[data-match-score]').textContent = `${match.homeGoals} : ${match.awayGoals}`;
+  document.querySelector('[data-match-opponent]').textContent = opponent.name;
+  const highlight = HIGHLIGHTS[match.highlightIndex];
+  document.querySelector('[data-match-minute]').textContent = `第 ${highlight.minute} 分钟`;
+  document.querySelector('[data-match-title]').textContent = highlight.title;
+  document.querySelector('[data-match-copy]').textContent = highlight.copy;
+  document.querySelector('[data-match-options]').innerHTML = highlight.choices.map(choice => (
+    `<button type="button" data-highlight-choice="${choice.id}"><strong>${choice.label}</strong><small>这个决定会立即改变场上局面</small></button>`
+  )).join('');
+}
+
+function renderManagementMetrics() {
+  const active = isManagementWeekDay(state.dayIndex);
+  const metrics = document.querySelector('[data-management-metrics]');
+  metrics.hidden = !active;
+  if (!active) return;
+  document.querySelector('[data-metric="cash"]').textContent = `${state.economy.cash}元`;
+  document.querySelector('[data-metric="facility"]').textContent = state.facilities.condition;
+  document.querySelector('[data-metric="cohesion"]').textContent = state.roster.cohesion;
+  document.querySelector('[data-metric="community"]').textContent = state.communitySupport;
+  document.querySelector('[data-metric="governance"]').textContent = `${state.governance.support}/5`;
+}
+
+function renderManagementControls() {
+  const button = document.querySelector('[data-end-management-day]');
+  if (!isManagementWeekDay(state.dayIndex) || state.phase !== 'morning' || state.management.weekComplete) {
+    button.hidden = true;
+    return;
+  }
+  const actionId = getRequiredAction(state.dayIndex);
+  button.hidden = !state.management.completedActions.includes(actionId)
+    || state.management.shortfallPending
+    || Boolean(decisionAction);
+  button.textContent = state.dayIndex === 9 ? '结算这一周' : '收好今天的决定';
+}
+
 function renderSummary() {
-  const complete = state.phase === 'complete' && !state.chapterComplete;
+  const managementDay = isManagementWeekDay(state.dayIndex);
+  const complete = state.phase === 'complete'
+    && !state.chapterComplete
+    && !(managementDay && state.management.weekComplete);
   summary.hidden = !complete;
   if (!complete) return;
 
   const day = currentDay();
+  if (managementDay) {
+    const record = state.management.dailyRecords.findLast(entry => entry.dayIndex === state.dayIndex);
+    const actionId = getRequiredAction(state.dayIndex);
+    document.querySelector('[data-summary-date]').textContent = `${day.weekday} / 春 ${day.date} 日`;
+    document.querySelector('[data-summary-title]').textContent = ACTION_COPY[actionId].title;
+    document.querySelector('[data-summary-copy]').textContent = state.dayIndex === 8
+      ? '客队已经住下。明天的比分会被看见，但今天的接待方式也会留在大家的判断里。'
+      : '决定已经记入本周账本。它不会单独决定球场的命运，但会改变下一天的余地。';
+    document.querySelector('[data-summary-label="orders"]').textContent = '决定';
+    document.querySelector('[data-summary-label="repair"]').textContent = '现金';
+    document.querySelector('[data-summary-label="money"]').textContent = '社区';
+    document.querySelector('[data-summary-label="person"]').textContent = '委员会';
+    document.querySelector('[data-summary-orders]').textContent = choiceLabel(actionId, record?.choiceId ?? '完成');
+    document.querySelector('[data-summary-repair]').textContent = `${state.economy.cash} 元`;
+    document.querySelector('[data-summary-money]').textContent = String(state.communitySupport);
+    document.querySelector('[data-summary-person]').textContent = `${state.governance.support}/5`;
+    const nextDay = getCampaignDay(state.dayIndex + 1);
+    document.querySelector('[data-next-day]').textContent = `去往春 ${nextDay.date} 日`;
+    return;
+  }
+
   const history = state.history.at(-1);
   const repair = history?.repair ? REPAIRS[history.repair] : null;
+  document.querySelector('[data-summary-label="orders"]').textContent = '接待';
+  document.querySelector('[data-summary-label="repair"]').textContent = '场地';
+  document.querySelector('[data-summary-label="money"]').textContent = '余下';
+  document.querySelector('[data-summary-label="person"]').textContent = '认识';
   document.querySelector('[data-summary-date]').textContent = `${day.season} ${day.date} · 晚间`;
   document.querySelector('[data-summary-title]').textContent = day.date === 14 ? '友谊赛散场了' : '今天留下了痕迹';
   document.querySelector('[data-summary-copy]').textContent = repair
@@ -477,6 +748,28 @@ function renderSummary() {
     ? `训练 ${state.training.lastScore} 分`
     : state.relationship.coachMet ? '郭教练' : '留到明天';
   document.querySelector('[data-next-day]').textContent = day.date === 14 ? '看看这三天' : `去往春 ${day.date + 1} 日`;
+}
+
+function renderWeekSummary() {
+  const active = Boolean(state.management?.weekComplete && state.management.settlement && !weekSummaryDismissed);
+  weekSummary.hidden = !active;
+  if (!active) return;
+  const settlement = state.management.settlement;
+  const opponent = getOpponent(state.management.opponentId);
+  const outcomeCopy = settlement.outcome === 'win' ? '赢下' : settlement.outcome === 'draw' ? '战平' : '输给';
+  document.querySelector('[data-week-summary-title]').textContent = '球场撑过了第一周';
+  document.querySelector('[data-week-summary-copy]').textContent = `海风球场${outcomeCopy}${opponent.name}。比赛带来了${settlement.audience}名观众，也让委员会第一次有了继续经营的完整账目。`;
+  document.querySelector('[data-week-score]').textContent = `海风球场 ${settlement.score.home} : ${settlement.score.away} ${opponent.shortName}`;
+  const items = [
+    ['现金', `${settlement.metrics.cash}元`],
+    ['球场', settlement.metrics.facility],
+    ['凝聚', settlement.metrics.cohesion],
+    ['社区', settlement.metrics.community],
+    ['委员会', `${settlement.metrics.governance}/5`]
+  ];
+  document.querySelector('[data-week-metrics]').innerHTML = items.map(([label, value]) => (
+    `<div><span>${label}</span><strong>${value}</strong></div>`
+  )).join('');
 }
 
 function renderChapterSummary() {
@@ -492,8 +785,9 @@ function renderChapterSummary() {
 function renderTraining() {
   root.classList.toggle('training-active', trainingActive);
   trainingLayer.hidden = !trainingActive;
-  touchControls.hidden = trainingActive || state.phase !== 'morning';
-  touchAction.hidden = trainingActive || state.phase !== 'morning';
+  const managementModal = Boolean(decisionAction);
+  touchControls.hidden = trainingActive || state.phase !== 'morning' || managementModal;
+  touchAction.hidden = trainingActive || state.phase !== 'morning' || managementModal;
   if (!trainingActive || !trainingSession) return;
 
   const target = TRAINING_TARGETS[trainingSession.shotIndex];
@@ -512,20 +806,29 @@ function renderStartCard() {
   const continueButton = document.querySelector('[data-continue]');
   continueButton.hidden = !loaded.ok;
   document.querySelector('[data-save-summary]').textContent = loaded.ok
-    ? `存档停在春 ${getDayContent(state.dayIndex).date} 日，${state.money} 元，已经修好 ${state.repairs.length} 处。`
+    ? `存档停在春 ${currentDay().date} 日，${isManagementWeekDay(state.dayIndex) ? state.economy.cash : state.money} 元，已经修好 ${state.repairs.length} 处。`
     : '这份存档无法读取。可以重新从抵达海风球场的早晨开始。';
 }
 
 function renderModals() {
   renderSummary();
   renderChapterSummary();
+  renderWeekSummary();
+  renderDecisionPanel();
+  renderMatchPanel();
   renderStartCard();
-  summaryDim.hidden = summary.hidden && chapterSummary.hidden && startCard.hidden;
+  summaryDim.hidden = summary.hidden
+    && chapterSummary.hidden
+    && weekSummary.hidden
+    && decisionPanel.hidden
+    && matchPanel.hidden
+    && startCard.hidden;
 }
 
 function render() {
   root.dataset.phase = state.phase;
   root.dataset.day = String(state.dayIndex);
+  root.dataset.mode = isManagementWeekDay(state.dayIndex) ? 'management' : 'prologue';
   const details = phaseDetails();
   renderCalendar();
   document.querySelector('[data-time]').textContent = formatTime(state.minute);
@@ -541,19 +844,31 @@ function render() {
   }
 
   const optional = document.querySelector('[data-optional-event]');
-  optional.classList.toggle('complete', state.relationship.coachMet);
-  const trustCopy = state.relationship.coachTrust > 0 ? `，默契 ${state.relationship.coachTrust}` : '';
-  document.querySelector('[data-relationship-status]').textContent = state.relationship.coachMet
-    ? `郭教练已经记住了你的名字${trustCopy}`
-    : '还没有和郭教练说话';
+  if (isManagementWeekDay(state.dayIndex)) {
+    const talked = getNpcSchedule(state.dayIndex, 'morning', { opponentId: state.management.opponentId })
+      .filter(npc => state.events.includes(`talk-${npc.id}-day-${state.dayIndex}`))
+      .map(npc => npc.name);
+    optional.classList.toggle('complete', talked.length > 0);
+    document.querySelector('[data-relationship-status]').textContent = talked.length
+      ? `今天和${talked.join('、')}谈过`
+      : '今天还没有和场上的人谈过';
+  } else {
+    optional.classList.toggle('complete', state.relationship.coachMet);
+    const trustCopy = state.relationship.coachTrust > 0 ? `，默契 ${state.relationship.coachTrust}` : '';
+    document.querySelector('[data-relationship-status]').textContent = state.relationship.coachMet
+      ? `郭教练已经记住了你的名字${trustCopy}`
+      : '还没有和郭教练说话';
+  }
 
   renderPhases();
   renderJournal();
   renderWorldTargets();
   renderShop();
   renderRepairs();
+  renderManagementMetrics();
   renderTraining();
   renderModals();
+  renderManagementControls();
   updatePlayerVisual();
 }
 
@@ -569,6 +884,7 @@ function beginTraining() {
   trainingActive = true;
   destination = null;
   pendingInteraction = null;
+  movementRoute = [];
   toastHost.replaceChildren();
   showSpeech('郭教练', '不用证明什么。看准了，踢三脚就好。', { x: 53, y: 48 }, 3000);
   render();
@@ -598,6 +914,59 @@ function resolveTrainingShot(pointer = trainingPointer) {
   return true;
 }
 
+function openManagementAction(actionId) {
+  if (!isManagementWeekDay(state.dayIndex) || state.phase !== 'morning') return false;
+  notes.hidden = true;
+  destination = null;
+  pendingInteraction = null;
+  movementRoute = [];
+  if (actionId === 'play-match') {
+    const previousMatch = state.management.match;
+    state = startWeeklyMatch(state);
+    if (!state.management.match) {
+      showToast(state.journal.at(-1)?.text);
+      render();
+      return false;
+    }
+    decisionAction = 'play-match';
+    if (state.management.match !== previousMatch) persist();
+  } else {
+    decisionAction = actionId;
+  }
+  render();
+  return true;
+}
+
+function applyDecisionChoice(choiceId) {
+  if (!decisionAction || decisionAction === 'play-match') return false;
+  const previous = state;
+  state = decisionAction === 'resolve-shortfall'
+    ? resolveManagementShortfall(state, choiceId)
+    : completeRequiredAction(state, decisionAction, choiceId);
+  const changed = state !== previous;
+  if (changed) {
+    showToast(state.journal.at(-1)?.text);
+    persist();
+  }
+  decisionAction = state.management.shortfallPending ? 'resolve-shortfall' : null;
+  render();
+  return changed;
+}
+
+function applyHighlightChoice(choiceId) {
+  if (decisionAction !== 'play-match') return false;
+  const previous = state;
+  state = chooseMatchHighlight(state, choiceId);
+  if (state !== previous) persist();
+  if (state.management.matchResult) {
+    decisionAction = null;
+    const result = state.management.matchResult;
+    showToast(`终场 ${result.score.home} 比 ${result.score.away}。${result.crowdMood}。`);
+  }
+  render();
+  return state !== previous;
+}
+
 function changeMap(exit) {
   state.world.positions[activeMapId] = { ...position };
   activeMapId = exit.targetMap;
@@ -606,6 +975,7 @@ function changeMap(exit) {
   state.world.positions[activeMapId] = { ...position };
   destination = null;
   pendingInteraction = null;
+  movementRoute = [];
   speech.hidden = true;
   render();
   fitWorld();
@@ -649,6 +1019,7 @@ function interact(id) {
     if (successful) {
       destination = null;
       pendingInteraction = null;
+      movementRoute = [];
       position = { x: 73, y: 43 };
       persist();
       showSpeech(currentOrders()[0].customer, '今天这里真的开门？那我先来。', { x: 70, y: 35 }, 2800);
@@ -664,7 +1035,7 @@ function interact(id) {
     showSpeech(object.npc.name, object.npc.copy, { x: object.x, y: Math.max(20, object.y - 12) }, 5200);
   }
   if (object.kind === 'mainline') {
-    showToast('今天的决定已经摆在这里，打开安排面板就能处理。');
+    successful = openManagementAction(object.actionId);
   }
   return successful;
 }
@@ -682,7 +1053,9 @@ function interactNearest() {
 function walkToObject(id) {
   const object = worldObjects[id];
   if (!object || !availableObject(id)) return false;
-  destination = { ...object.approach };
+  if (pixelDistance(position, object) <= INTERACTION_DISTANCE) return interact(id);
+  movementRoute = [...(object.route ?? []), object.approach].map(point => ({ ...point }));
+  destination = movementRoute.shift() ?? { ...object.approach };
   pendingInteraction = id;
   return true;
 }
@@ -718,7 +1091,13 @@ function keyboardVector() {
 }
 
 function advanceMovement(deltaSeconds, timestamp) {
-  if (!hasStarted || trainingActive || state.phase !== 'morning' || !summary.hidden || !chapterSummary.hidden) {
+  if (!hasStarted
+    || trainingActive
+    || decisionAction
+    || state.phase !== 'morning'
+    || !summary.hidden
+    || !chapterSummary.hidden
+    || (!weekSummary.hidden && !weekSummaryDismissed)) {
     moving = false;
     player.classList.remove('moving');
     player.dataset.frame = '0';
@@ -729,16 +1108,21 @@ function advanceMovement(deltaSeconds, timestamp) {
   if (vector.x || vector.y) {
     destination = null;
     pendingInteraction = null;
+    movementRoute = [];
   } else if (destination) {
     const current = toPixels(position);
     const goal = toPixels(destination);
     vector = { x: goal.x - current.x, y: goal.y - current.y };
     if (Math.hypot(vector.x, vector.y) <= ARRIVAL_DISTANCE) {
       position = { ...destination };
-      destination = null;
-      const interaction = pendingInteraction;
-      pendingInteraction = null;
-      if (interaction) interact(interaction);
+      if (movementRoute.length) {
+        destination = movementRoute.shift();
+      } else {
+        destination = null;
+        const interaction = pendingInteraction;
+        pendingInteraction = null;
+        if (interaction) interact(interaction);
+      }
       vector = { x: 0, y: 0 };
     }
   }
@@ -809,19 +1193,45 @@ function frame(timestamp) {
   requestAnimationFrame(frame);
 }
 
+function startManagementWeek() {
+  const previous = state;
+  state = beginManagementWeek(state);
+  if (state === previous || !isManagementWeekDay(state.dayIndex)) {
+    showToast(state.journal.at(-1)?.text);
+    render();
+    return false;
+  }
+  activeMapId = state.world.mapId;
+  position = { ...(state.world.positions[activeMapId] ?? getMap(activeMapId).start) };
+  destination = null;
+  pendingInteraction = null;
+  movementRoute = [];
+  decisionAction = null;
+  weekSummaryDismissed = false;
+  window.clearTimeout(speechTimer);
+  speech.hidden = true;
+  chapterSummary.hidden = true;
+  persist();
+  render();
+  fitWorld();
+  showToast('春15日。主赛场的账本已经摊开。');
+  return true;
+}
+
 function goToNextDay() {
   const previousDay = state.dayIndex;
   const previousChapter = state.chapterComplete;
-  state = advanceDay(state);
+  state = isManagementWeekDay(state.dayIndex) ? advanceCampaignDay(state) : advanceDay(state);
   const successful = state.dayIndex !== previousDay || state.chapterComplete !== previousChapter;
   showToast(state.journal.at(-1)?.text);
   if (state.dayIndex !== previousDay) {
-    activeMapId = 'training';
+    activeMapId = isManagementWeekDay(state.dayIndex) ? getCampaignDay(state.dayIndex).defaultMap : 'training';
     state.world.mapId = activeMapId;
-    position = { ...getMap(activeMapId).start };
+    position = { ...(state.world.positions[activeMapId] ?? getMap(activeMapId).start) };
     state.world.positions[activeMapId] = { ...position };
     destination = null;
     pendingInteraction = null;
+    movementRoute = [];
     speech.hidden = true;
     notes.hidden = true;
     prompt.hidden = false;
@@ -838,18 +1248,23 @@ function resetGame() {
   position = { ...getMap(activeMapId).start };
   destination = null;
   pendingInteraction = null;
+  movementRoute = [];
   trainingActive = false;
   trainingSession = null;
   trainingFeedback = '';
   hasStarted = true;
   newGameArmed = false;
   chapterResetArmed = false;
+  weekResetArmed = false;
+  decisionAction = null;
+  weekSummaryDismissed = false;
   speech.hidden = true;
   notes.hidden = true;
   toastHost.replaceChildren();
   prompt.hidden = false;
   document.querySelector('[data-new-game]').textContent = '重新开始';
   document.querySelector('[data-chapter-restart]').textContent = '从抵达那天重新开始';
+  document.querySelector('[data-week-restart]').textContent = '从序章重新开始';
   render();
   fitWorld();
 }
@@ -870,6 +1285,7 @@ plane.addEventListener('click', event => {
   if (canStand(point.x, point.y)) {
     destination = point;
     pendingInteraction = null;
+    movementRoute = [];
   } else {
     showToast('那边过不去，沿着场边的小路走。');
   }
@@ -908,6 +1324,52 @@ document.querySelector('[data-finish-day]').addEventListener('click', () => {
 });
 
 document.querySelector('[data-next-day]').addEventListener('click', goToNextDay);
+
+document.querySelector('[data-begin-week]').addEventListener('click', startManagementWeek);
+
+document.querySelector('[data-decision-options]').addEventListener('click', event => {
+  const button = event.target.closest('[data-decision-choice]');
+  if (button) applyDecisionChoice(button.dataset.decisionChoice);
+});
+
+document.querySelector('[data-decision-close]').addEventListener('click', () => {
+  if (decisionAction === 'resolve-shortfall') return;
+  decisionAction = null;
+  render();
+});
+
+document.querySelector('[data-match-options]').addEventListener('click', event => {
+  const button = event.target.closest('[data-highlight-choice]');
+  if (button) applyHighlightChoice(button.dataset.highlightChoice);
+});
+
+document.querySelector('[data-end-management-day]').addEventListener('click', () => {
+  const previous = state;
+  state = finishManagementDay(state);
+  showToast(state.journal.at(-1)?.text);
+  if (state !== previous) {
+    weekSummaryDismissed = false;
+    persist();
+  }
+  render();
+});
+
+document.querySelector('[data-week-walk]').addEventListener('click', () => {
+  weekSummaryDismissed = true;
+  state = { ...state, phase: 'morning' };
+  persist();
+  render();
+  viewport.focus();
+});
+
+document.querySelector('[data-week-restart]').addEventListener('click', event => {
+  if (!weekResetArmed) {
+    weekResetArmed = true;
+    event.currentTarget.textContent = '确认从序章重新开始';
+    return;
+  }
+  resetGame();
+});
 
 document.querySelector('[data-continue]').addEventListener('click', () => {
   hasStarted = true;
@@ -954,6 +1416,7 @@ document.querySelectorAll('[data-move]').forEach(button => {
     event.preventDefault();
     destination = null;
     pendingInteraction = null;
+    movementRoute = [];
     pressedKeys.add(key);
     button.setPointerCapture?.(event.pointerId);
   });
@@ -1007,8 +1470,20 @@ window.addEventListener('resize', fitWorld);
 window.__integratedDayDebug = {
   getState: () => structuredClone(state),
   getPosition: () => ({ ...position }),
+  getMapId: () => activeMapId,
   walkToObject,
   interact,
+  openManagementAction,
+  chooseDecision: applyDecisionChoice,
+  chooseHighlight: applyHighlightChoice,
+  finishManagementDay: () => {
+    const previous = state;
+    state = finishManagementDay(state);
+    if (state !== previous) persist();
+    render();
+    return state !== previous;
+  },
+  advanceCampaignDay: goToNextDay,
   shootAt: value => resolveTrainingShot(value),
   isMoving: () => moving || Boolean(destination),
   hasSave: () => loadSave(localStorage).ok,

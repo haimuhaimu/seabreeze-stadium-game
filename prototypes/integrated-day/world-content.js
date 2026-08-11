@@ -4,12 +4,14 @@ const freezeMap = map => Object.freeze({
   exits: Object.freeze(map.exits.map(exit => Object.freeze({
     ...exit,
     approach: Object.freeze({ ...exit.approach }),
-    targetPosition: Object.freeze({ ...exit.targetPosition })
+    targetPosition: Object.freeze({ ...exit.targetPosition }),
+    route: Object.freeze((exit.route ?? []).map(point => Object.freeze({ ...point })))
   }))),
   blockedAreas: Object.freeze(map.blockedAreas.map(area => Object.freeze({ ...area }))),
   objects: Object.freeze(map.objects.map(object => Object.freeze({
     ...object,
-    approach: Object.freeze({ ...object.approach })
+    approach: Object.freeze({ ...object.approach }),
+    route: Object.freeze((object.route ?? []).map(point => Object.freeze({ ...point })))
   })))
 });
 
@@ -60,6 +62,7 @@ export const MAPS = Object.freeze({
       x: 4,
       y: 91,
       approach: { x: 8, y: 90 },
+      route: [{ x: 84, y: 68 }, { x: 84, y: 88 }],
       label: '沿海滨路回旧训练场',
       targetMap: 'training',
       targetPosition: { x: 91, y: 87 }
@@ -72,10 +75,34 @@ export const MAPS = Object.freeze({
       { x1: 0, y1: 70, x2: 80, y2: 84 }
     ],
     objects: [
-      { id: 'stadium-office', x: 70, y: 66, approach: { x: 67, y: 67 }, kind: 'mainline', label: '进入经营办公室' },
+      {
+        id: 'stadium-office',
+        x: 70,
+        y: 66,
+        approach: { x: 67, y: 67 },
+        route: [{ x: 84, y: 88 }, { x: 84, y: 68 }],
+        kind: 'mainline',
+        label: '进入经营办公室'
+      },
       { id: 'pitch-prep', x: 52, y: 68, approach: { x: 52, y: 66 }, kind: 'mainline', label: '检查比赛草场' },
-      { id: 'guest-gate', x: 5, y: 36, approach: { x: 8, y: 40 }, kind: 'mainline', label: '去客队通道' },
-      { id: 'match-center', x: 52, y: 48, approach: { x: 52, y: 61 }, kind: 'mainline', label: '准备主场比赛' }
+      {
+        id: 'guest-gate',
+        x: 7,
+        y: 30,
+        approach: { x: 4, y: 40 },
+        route: [{ x: 30, y: 68 }, { x: 4, y: 68 }],
+        kind: 'mainline',
+        label: '去客队通道'
+      },
+      {
+        id: 'match-center',
+        x: 52,
+        y: 48,
+        approach: { x: 52, y: 59 },
+        route: [{ x: 4, y: 68 }, { x: 62, y: 68 }],
+        kind: 'mainline',
+        label: '准备主场比赛'
+      }
     ]
   })
 });

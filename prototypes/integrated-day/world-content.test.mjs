@@ -9,6 +9,19 @@ test('training and stadium maps have reciprocal exits and safe spawn points', ()
   assert.equal(canStandOnMap('stadium', MAPS.stadium.start.x, MAPS.stadium.start.y), true);
 });
 
+test('stadium mainline routes stay on walkable paths', () => {
+  for (const object of [...MAPS.stadium.objects, ...MAPS.stadium.exits]) {
+    const route = [...object.route, object.approach];
+    for (const point of route) {
+      assert.equal(
+        canStandOnMap('stadium', point.x, point.y),
+        true,
+        `${object.id} route enters a blocked area at ${point.x},${point.y}`
+      );
+    }
+  }
+});
+
 test('Lin Xu and Xiaoman all appear during the first week', () => {
   const names = new Set();
   for (let dayIndex = 3; dayIndex <= 9; dayIndex += 1) {
