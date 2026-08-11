@@ -17,12 +17,12 @@ test('campaign calendar joins the three-day prologue to one management week', ()
 
 test('the first week has one required mainline action per day', () => {
   assert.deepEqual(CAMPAIGN_DAYS.slice(3).map(day => getRequiredAction(day.dayIndex)), [
-    'review-ledger',
-    'choose-training',
-    'choose-opponent',
-    'choose-market',
-    'prepare-facility',
-    'welcome-opponent',
-    'play-match'
+    'episode-notice',
+    'episode-promises',
+    'episode-promise',
+    'episode-promise',
+    'episode-funding',
+    'episode-offer',
+    'episode-match'
   ]);
 });

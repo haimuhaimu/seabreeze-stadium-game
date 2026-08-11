@@ -2,13 +2,13 @@ const entries = [
   ['周五', 12, '抵达', null, 'training'],
   ['周六', 13, '一起训练', null, 'training'],
   ['周日', 14, '友谊赛日', null, 'training'],
-  ['周一', 15, '账本上的缺口', 'review-ledger', 'stadium'],
-  ['周二', 16, '谁能上场', 'choose-training', 'training'],
-  ['周三', 17, '邀请谁来', 'choose-opponent', 'stadium'],
-  ['周四', 18, '看台之外', 'choose-market', 'training'],
-  ['周五', 19, '比赛前夜', 'prepare-facility', 'stadium'],
-  ['周六', 20, '客队抵达', 'welcome-opponent', 'stadium'],
-  ['周日', 21, '第一场主场周赛', 'play-match', 'stadium']
+  ['周一', 15, '空白通知', 'episode-notice', 'stadium'],
+  ['周二', 16, '门外的七号', 'episode-promises', 'training'],
+  ['周三', 17, '只来得及两件事', 'episode-promise', 'training'],
+  ['周四', 18, '第二个承诺', 'episode-promise', 'training'],
+  ['周五', 19, '灯亮以前', 'episode-funding', 'stadium'],
+  ['周六', 20, '沈峤的旧球员证', 'episode-offer', 'stadium'],
+  ['周日', 21, '比赛与五把椅子', 'episode-match', 'stadium']
 ];
 
 export const CAMPAIGN_DAYS = Object.freeze(entries.map((entry, dayIndex) => Object.freeze({
