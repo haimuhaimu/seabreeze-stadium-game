@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { getOrders } from './daily-content.js';
 import {
   createGameState,
+  createFirstWeekEntryState,
   collectItem,
   talkToCoach,
   startTraining,
@@ -20,6 +21,17 @@ import {
   finishManagementDay,
   advanceCampaignDay
 } from './game-state.js';
+
+test('a direct entry starts at the visible management week without erasing prologue history', () => {
+  const state = createFirstWeekEntryState();
+  assert.equal(state.dayIndex, 3);
+  assert.equal(state.phase, 'morning');
+  assert.equal(state.world.mapId, 'stadium');
+  assert.equal(state.history.length, 3);
+  assert.deepEqual(state.repairs, ['awning', 'net']);
+  assert.equal(state.relationship.coachMet, true);
+  assert.equal(state.economy.cash, 107);
+});
 
 function gatherAll(state) {
   for (const itemId of ['tea-a', 'tea-b', 'fruit-a', 'fruit-b']) {

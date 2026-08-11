@@ -1250,7 +1250,7 @@ kbd {
   animation: summary-in 420ms var(--ease) both;
 }
 
-.start-card { z-index: 60; width: min(450px, calc(100vw - 34px)); text-align: center; }
+.start-card { z-index: 60; width: min(660px, calc(100vw - 34px)); text-align: left; }
 .week-summary { width: min(620px, calc(100vw - 34px)); }
 .chapter-summary > span,
 .start-card > span,
@@ -1261,7 +1261,17 @@ kbd {
 .chapter-summary > p,
 .start-card > p,
 .week-summary > p { margin: 0; color: #526a70; font-size: 12px; line-height: 1.65; }
-.start-card > div { margin-top: 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.start-preview {
+  width: 100%;
+  aspect-ratio: 16 / 6.7;
+  margin: 14px 0 12px;
+  display: block;
+  border: 1px solid rgb(38 76 85 / 24%);
+  border-radius: 8px;
+  object-fit: cover;
+  object-position: center 54%;
+}
+.start-actions { margin-top: 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .start-card button,
 .chapter-actions button,
 .week-actions button {
@@ -1274,7 +1284,11 @@ kbd {
   cursor: pointer;
   font-weight: 800;
 }
+.start-card button:active { transform: translateY(1px); }
+.start-card [data-direct-week] { grid-column: 1 / -1; font-size: 14px; }
+.start-card [data-continue] { border-color: #305a64; background: #254a55; color: #eef5f3; }
 .start-card [data-new-game] { border-color: #78939a; background: #dce8e9; color: #29434a; }
+.start-card[data-has-save="false"] [data-new-game] { grid-column: 1 / -1; }
 .chapter-actions,
 .week-actions { display: grid; grid-template-columns: 1.35fr 1fr; gap: 8px; }
 .chapter-actions [data-chapter-restart],
@@ -1463,6 +1477,11 @@ kbd {
   .chapter-summary,
   .start-card,
   .week-summary { padding: 21px 19px 18px; }
+  .start-card h1 { font-size: clamp(27px, 8.2vw, 36px); }
+  .start-preview { aspect-ratio: 16 / 8.5; }
+  .start-actions { grid-template-columns: 1fr; }
+  .start-card [data-direct-week],
+  .start-card[data-has-save="false"] [data-new-game] { grid-column: auto; }
   .chapter-history { grid-template-columns: 1fr; }
   .chapter-actions,
   .week-actions { grid-template-columns: 1fr; }

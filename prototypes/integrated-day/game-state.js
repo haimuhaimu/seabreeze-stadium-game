@@ -157,6 +157,24 @@ export function createGameState() {
 
 export const createDayState = createGameState;
 
+export function createFirstWeekEntryState() {
+  const prologue = createGameState();
+  prologue.dayIndex = 2;
+  prologue.phase = 'complete';
+  prologue.minute = 1100;
+  prologue.money = 87;
+  prologue.repairs = ['awning', 'net'];
+  prologue.relationship = { coachMet: true, coachTrust: 1 };
+  prologue.events = ['met-coach', 'repair-awning', 'repair-net', 'chapter-one-complete'];
+  prologue.history = [
+    { dayIndex: 0, season: '春', date: 12, title: '抵达', revenue: 38, money: 20, repair: 'awning', savedMoney: false, trainingScore: null, coachTrust: 0 },
+    { dayIndex: 1, season: '春', date: 13, title: '一起训练', revenue: 41, money: 61, repair: null, savedMoney: true, trainingScore: 6, coachTrust: 1 },
+    { dayIndex: 2, season: '春', date: 14, title: '友谊赛日', revenue: 50, money: 87, repair: 'net', savedMoney: false, trainingScore: null, coachTrust: 1 }
+  ];
+  prologue.chapterComplete = true;
+  return beginManagementWeek(prologue);
+}
+
 export function collectItem(state, itemId) {
   if (state.phase !== 'morning') {
     return addJournal(state, 'quiet', '备料时间已经过去了，明天再来看看。');

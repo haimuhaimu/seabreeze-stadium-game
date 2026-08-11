@@ -257,6 +257,54 @@ async function completeManagementDay(dayIndex, actionId, choiceId, { shortfallRo
 
 async function testThreeDayLoop() {
   await navigate();
+  const launch = await evaluate(`({
+    visible: !document.querySelector('[data-start-card]').hidden,
+    title: document.querySelector('[data-start-card] h1').textContent.trim(),
+    directLabel: document.querySelector('[data-direct-week]').textContent.trim(),
+    previewLoaded: document.querySelector('.start-preview').complete
+      && document.querySelector('.start-preview').naturalWidth === 1672,
+    continueHidden: document.querySelector('[data-continue]').hidden
+  })`);
+  assert(launch.visible, 'A fresh profile does not show the new launch screen');
+  assert(launch.title.includes('真正的主场'), 'The launch screen does not make the new stadium visible');
+  assert(launch.directLabel === '直接进入经营周', 'The direct management-week entry is missing');
+  assert(launch.previewLoaded, 'The main stadium preview did not load');
+  assert(launch.continueHidden, 'A fresh profile should not offer an absent save');
+  await assertInsideViewport('[data-start-card]');
+  await capture('launch');
+
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 2,
+    mobile: true
+  });
+  await sleep(250);
+  assert(!await evaluate('document.documentElement.scrollWidth > innerWidth'), 'Launch screen overflows on mobile');
+  await assertInsideViewport('[data-start-card]');
+  await capture('launch-mobile');
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 1440,
+    height: 900,
+    deviceScaleFactor: 1,
+    mobile: false
+  });
+  await sleep(250);
+
+  await click('[data-direct-week]');
+  await waitFor('window.__integratedDayDebug.getState().dayIndex === 3', 'Direct entry did not open the management week');
+  const directWeek = await evaluate(`({
+    map: window.__integratedDayDebug.getMapId(),
+    cash: window.__integratedDayDebug.getState().economy.cash,
+    history: window.__integratedDayDebug.getState().history.length,
+    startHidden: document.querySelector('[data-start-card]').hidden
+  })`);
+  assert(directWeek.map === 'stadium' && directWeek.cash === 107, 'Direct entry did not create the intended stadium state');
+  assert(directWeek.history === 3 && directWeek.startHidden, 'Direct entry did not preserve the prologue summary');
+  await evaluate('window.__integratedDayDebug.clearProjectSave()');
+  await navigate();
+  await click('[data-new-game]');
+
   const desktop = await evaluate(`({
     phase: document.querySelector('.game').dataset.phase,
     date: document.querySelector('[data-date]').textContent.trim(),
@@ -272,7 +320,7 @@ async function testThreeDayLoop() {
   assert(desktop.mapLoaded, 'The seaside map did not load');
   assert(desktop.playerAtlas, 'The unified An Ruotong atlas is not connected');
   assert(desktop.teamAtlas, 'The complete team atlas is not connected');
-  assert(desktop.startHidden, 'A fresh profile should not show continue controls');
+  assert(desktop.startHidden, 'Starting the prologue did not close the launch screen');
 
   const beforeWalk = await evaluate('window.__integratedDayDebug.getPosition()');
   await click('[data-object="coach"]');
@@ -297,6 +345,9 @@ async function testThreeDayLoop() {
   assert(!await evaluate('document.querySelector("[data-start-card]").hidden'), 'Reload did not offer the saved game');
   assert((await text('[data-save-summary]')).includes('春 13 日'), 'Continue card has the wrong saved date');
   await assertInsideViewport('[data-start-card]');
+  await click('[data-direct-week]');
+  assert((await text('[data-direct-week]')).includes('确认进入'), 'Existing saves do not require confirmation before direct entry');
+  assert(await evaluate('window.__integratedDayDebug.getState().dayIndex === 1'), 'Direct-entry confirmation changed the existing save too early');
   await click('[data-continue]');
   const restored = await evaluate('window.__integratedDayDebug.getState()');
   assert(restored.dayIndex === 1 && restored.money === 20, 'Spring 13 money did not restore');
@@ -461,6 +512,7 @@ try {
   });
   await testThreeDayLoop();
   console.log('PASS three-day life loop');
+  console.log('PASS visible launch screen and direct management-week entry');
   console.log('PASS training and relationship path');
   console.log('PASS save and reload restoration');
   console.log('PASS desktop and mobile layout');

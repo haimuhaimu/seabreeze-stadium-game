@@ -6,6 +6,7 @@ import {
   MARKET_PLANS,
   WELCOME_PLANS,
   createGameState,
+  createFirstWeekEntryState,
   collectItem,
   talkToCoach,
   startTraining,
@@ -79,7 +80,7 @@ let state = loaded.ok ? loaded.record.state : createGameState();
 let activeMapId = loaded.ok ? (loaded.record.mapId ?? state.world.mapId) : 'training';
 let position = loaded.ok ? loaded.record.position : { ...getMap(activeMapId).start };
 let worldObjects = {};
-let hasStarted = loaded.reason === 'absent';
+let hasStarted = false;
 let destination = null;
 let pendingInteraction = null;
 let movementRoute = [];
@@ -94,6 +95,7 @@ let trainingSession = null;
 let trainingPointer = 0.5;
 let trainingFeedback = '';
 let newGameArmed = false;
+let directWeekArmed = false;
 let chapterResetArmed = false;
 let weekResetArmed = false;
 let decisionAction = null;
@@ -804,10 +806,13 @@ function renderStartCard() {
   startCard.hidden = hasStarted;
   if (hasStarted) return;
   const continueButton = document.querySelector('[data-continue]');
+  startCard.dataset.hasSave = String(loaded.ok);
   continueButton.hidden = !loaded.ok;
   document.querySelector('[data-save-summary]').textContent = loaded.ok
-    ? `存档停在春 ${currentDay().date} 日，${isManagementWeekDay(state.dayIndex) ? state.economy.cash : state.money} 元，已经修好 ${state.repairs.length} 处。`
-    : '这份存档无法读取。可以重新从抵达海风球场的早晨开始。';
+    ? `存档停在春 ${currentDay().date} 日。可以继续原进度，也可以直接从主赛场的第一份账本开始。`
+    : loaded.reason === 'absent'
+      ? '新内容从春 15 日开始：经营大球场、邀请外队、处理现金缺口，并完成第一场主场周赛。'
+      : '上次存档无法读取。可以直接体验经营周，或从抵达的早晨重新开始。';
 }
 
 function renderModals() {
@@ -1193,20 +1198,17 @@ function frame(timestamp) {
   requestAnimationFrame(frame);
 }
 
-function startManagementWeek() {
-  const previous = state;
-  state = beginManagementWeek(state);
-  if (state === previous || !isManagementWeekDay(state.dayIndex)) {
-    showToast(state.journal.at(-1)?.text);
-    render();
-    return false;
-  }
+function enterManagementWeek(nextState) {
+  if (!isManagementWeekDay(nextState.dayIndex)) return false;
+  state = nextState;
+  hasStarted = true;
   activeMapId = state.world.mapId;
   position = { ...(state.world.positions[activeMapId] ?? getMap(activeMapId).start) };
   destination = null;
   pendingInteraction = null;
   movementRoute = [];
   decisionAction = null;
+  directWeekArmed = false;
   weekSummaryDismissed = false;
   window.clearTimeout(speechTimer);
   speech.hidden = true;
@@ -1216,6 +1218,23 @@ function startManagementWeek() {
   fitWorld();
   showToast('春15日。主赛场的账本已经摊开。');
   return true;
+}
+
+function startManagementWeek() {
+  const previous = state;
+  const nextState = beginManagementWeek(state);
+  if (nextState === previous || !isManagementWeekDay(nextState.dayIndex)) {
+    state = nextState;
+    showToast(state.journal.at(-1)?.text);
+    render();
+    return false;
+  }
+  return enterManagementWeek(nextState);
+}
+
+function startDirectManagementWeek() {
+  clearSave(localStorage);
+  return enterManagementWeek(createFirstWeekEntryState());
 }
 
 function goToNextDay() {
@@ -1254,6 +1273,7 @@ function resetGame() {
   trainingFeedback = '';
   hasStarted = true;
   newGameArmed = false;
+  directWeekArmed = false;
   chapterResetArmed = false;
   weekResetArmed = false;
   decisionAction = null;
@@ -1262,7 +1282,8 @@ function resetGame() {
   notes.hidden = true;
   toastHost.replaceChildren();
   prompt.hidden = false;
-  document.querySelector('[data-new-game]').textContent = '重新开始';
+  document.querySelector('[data-new-game]').textContent = '从抵达序章开始';
+  document.querySelector('[data-direct-week]').textContent = '直接进入经营周';
   document.querySelector('[data-chapter-restart]').textContent = '从抵达那天重新开始';
   document.querySelector('[data-week-restart]').textContent = '从序章重新开始';
   render();
@@ -1378,10 +1399,23 @@ document.querySelector('[data-continue]').addEventListener('click', () => {
   viewport.focus();
 });
 
+document.querySelector('[data-direct-week]').addEventListener('click', event => {
+  if (loaded.ok && !directWeekArmed) {
+    directWeekArmed = true;
+    event.currentTarget.textContent = '确认进入经营周';
+    return;
+  }
+  startDirectManagementWeek();
+});
+
 document.querySelector('[data-new-game]').addEventListener('click', event => {
+  if (!loaded.ok) {
+    resetGame();
+    return;
+  }
   if (!newGameArmed) {
     newGameArmed = true;
-    event.currentTarget.textContent = '确认重新开始';
+    event.currentTarget.textContent = '确认从序章开始';
     return;
   }
   resetGame();
