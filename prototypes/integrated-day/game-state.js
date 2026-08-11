@@ -6,6 +6,7 @@ import { createGovernance, applyGovernanceEffect } from './governance-state.js';
 import { getOpponent } from './opponent-content.js';
 import { createRoster, chooseTrainingFocus } from './roster-state.js';
 import { createMatch, resolveHighlight, finishMatch } from './match-engine.js';
+import { createEpisodeState } from './episode-state.js';
 
 export const GATHERABLES = Object.freeze({
   'tea-a': { inventoryKey: 'tea', label: '茶叶', journal: '花槽里的海岸茶草被风吹得很干净。' },
@@ -67,6 +68,14 @@ function copyState(state) {
     journal: state.journal.map(entry => ({ ...entry })),
     history: state.history.map(entry => ({ ...entry })),
     campaign: state.campaign ? { ...state.campaign } : undefined,
+    episode: state.episode ? {
+      ...state.episode,
+      sceneHistory: [...state.episode.sceneHistory],
+      promisesChosen: [...state.episode.promisesChosen],
+      promisesCompleted: [...state.episode.promisesCompleted],
+      matchChoices: state.episode.matchChoices.map(choice => ({ ...choice })),
+      consequence: state.episode.consequence ? { ...state.episode.consequence } : null
+    } : undefined,
     economy: state.economy ? {
       ...state.economy,
       entries: state.economy.entries.map(entry => ({ ...entry })),
@@ -120,7 +129,7 @@ function addEvent(next, eventId) {
 
 export function createGameState() {
   return {
-    version: 2,
+    version: 3,
     dayIndex: 0,
     phase: 'morning',
     minute: 550,
@@ -139,6 +148,7 @@ export function createGameState() {
     history: [],
     chapterComplete: false,
     campaign: { prologueComplete: false, week: 0 },
+    episode: createEpisodeState(),
     economy: createEconomy(0),
     facilities: createFacilities(),
     roster: createRoster(),
