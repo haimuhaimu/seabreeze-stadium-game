@@ -1300,6 +1300,9 @@ kbd {
 .hearing-chairs i { padding: 7px 3px; border: 1px solid rgb(51 86 94 / 22%); border-radius: 6px; background: rgb(255 255 255 / 34%); font-size: 8px; font-style: normal; text-align: center; }
 .hearing-options { display: grid; gap: 7px; }
 .hearing-options button { padding: 10px; border: 1px solid #80989e; border-bottom-width: 3px; border-radius: 8px; background: rgb(255 255 255 / 42%); color: #20363d; cursor: pointer; text-align: left; }
+.hearing-options strong,
+.hearing-options small { display: block; }
+.hearing-options small { margin-top: 3px; color: #5d7479; font-size: 9px; line-height: 1.45; }
 .hearing-options button:hover { border-color: #b95748; background: rgb(255 255 255 / 76%); }
 
 .decision-panel,

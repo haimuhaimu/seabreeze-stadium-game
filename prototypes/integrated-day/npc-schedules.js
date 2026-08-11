@@ -12,17 +12,17 @@ const firstWeek = Object.freeze({
   ]),
   4: Object.freeze([
     npc('xiaoman', '小满', 'npc-assistant', 'training', 61, 63, '我在门外都听见了。能不能陪我再练一次？', { optional: false }),
-    npc('aunt-xu', '许姨', 'npc-sumi', 'training', 75, 43, '小店还能开一天。钱不一定够，但大家会知道。'),
+    npc('aunt-xu', '许姨', 'npc-sumi', 'training', 82, 51, '小店还能开一天。钱不一定够，但大家会知道。'),
     npc('lin-chuan', '林川', 'npc-linchuan', 'training', 49, 62, '办公室有二十年前的旧记录，我去找钥匙。')
   ]),
   5: Object.freeze([
     npc('xiaoman', '小满', 'npc-assistant', 'training', 59, 63, '球已经放在边线了。你答应过的话，我还记得。', { promiseId: 'train' }),
-    npc('aunt-xu', '许姨', 'npc-sumi', 'training', 75, 43, '小店的杯子洗好了。今天不开，明天也许就来不及。', { promiseId: 'fundraise' }),
+    npc('aunt-xu', '许姨', 'npc-sumi', 'training', 82, 51, '小店的杯子洗好了。今天不开，明天也许就来不及。', { promiseId: 'fundraise' }),
     npc('lin-chuan', '林川', 'npc-linchuan', 'stadium', 67, 67, '办公室的旧柜子开了。那张通知应该还在里面。', { promiseId: 'records' })
   ]),
   6: Object.freeze([
     npc('xiaoman', '小满', 'npc-assistant', 'training', 59, 63, '今天结束以后，剩下的事就真的没有时间了。', { promiseId: 'train' }),
-    npc('aunt-xu', '许姨', 'npc-sumi', 'training', 75, 43, '我可以自己开店，但你来和不来，大家看得出来。', { promiseId: 'fundraise' }),
+    npc('aunt-xu', '许姨', 'npc-sumi', 'training', 82, 51, '我可以自己开店，但你来和不来，大家看得出来。', { promiseId: 'fundraise' }),
     npc('lin-chuan', '林川', 'npc-linchuan', 'stadium', 67, 67, '我先把照片找到了，还差签字和日期。', { promiseId: 'records' })
   ]),
   7: Object.freeze([
@@ -71,4 +71,3 @@ export function getNpcSchedule(dayIndex, phase = 'morning', context = {}) {
     };
   });
 }
-

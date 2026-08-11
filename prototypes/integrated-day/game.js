@@ -3,8 +3,6 @@ import { getCampaignDay, getRequiredAction, isPrologueDay, isManagementWeekDay }
 import {
   GATHERABLES,
   REPAIRS,
-  MARKET_PLANS,
-  WELCOME_PLANS,
   createGameState,
   createFirstWeekEntryState,
   collectItem,
@@ -18,10 +16,15 @@ import {
   finishDay,
   advanceDay,
   beginManagementWeek,
-  completeRequiredAction,
+  acknowledgeEpisodeNotice,
+  chooseEpisodePromises,
+  completeEpisodePromise,
+  resolveEpisodeFunding,
+  acknowledgeEpisodeOffer,
   resolveManagementShortfall,
   startWeeklyMatch,
   chooseMatchHighlight,
+  completeEpisodeHearing,
   finishManagementDay,
   advanceCampaignDay,
   recordNpcConversation
@@ -30,10 +33,16 @@ import { loadSave, writeSave, clearSave } from './save-game.js';
 import { TRAINING_TARGETS, createTrainingSession, takeShot } from './training-game.js';
 import { getMap, getMapObjects, canStandOnMap } from './world-content.js';
 import { getNpcSchedule } from './npc-schedules.js';
-import { OPPONENTS, getOpponent } from './opponent-content.js';
-import { FACILITY_PLANS } from './facility-state.js';
-import { TRAINING_FOCUS } from './roster-state.js';
-import { HIGHLIGHTS } from './match-engine.js';
+import { getOpponent } from './opponent-content.js';
+import { getAvailableHighlights } from './match-engine.js';
+import { PROMISES, getEpisodeDay, getStoryScene } from './episode-content.js';
+import {
+  ARCHIVE_CLUES,
+  createEpisodeActivity,
+  inspectArchiveClue,
+  serveFundraiser,
+  takePass
+} from './episode-activities.js';
 
 const root = document.querySelector('.game');
 const viewport = document.querySelector('[data-scene]');
@@ -55,6 +64,9 @@ const startCard = document.querySelector('[data-start-card]');
 const trainingLayer = document.querySelector('[data-training]');
 const decisionPanel = document.querySelector('[data-decision-panel]');
 const matchPanel = document.querySelector('[data-match-panel]');
+const storyScene = document.querySelector('[data-story-scene]');
+const episodeActivity = document.querySelector('[data-episode-activity]');
+const hearingPanel = document.querySelector('[data-hearing]');
 const weekSummary = document.querySelector('[data-week-summary]');
 const summaryDim = document.querySelector('[data-summary-dim]');
 const resourceIcon = document.querySelector('.money-slot .item-sprite');
@@ -99,6 +111,12 @@ let directWeekArmed = false;
 let chapterResetArmed = false;
 let weekResetArmed = false;
 let decisionAction = null;
+let storySceneId = null;
+let storyReadOnly = false;
+let promiseDraft = [];
+let activeEpisodeActivity = null;
+let activePromiseId = null;
+let ledgerOpen = false;
 let weekSummaryDismissed = false;
 const pressedKeys = new Set();
 
@@ -111,42 +129,75 @@ function currentOrders() {
 }
 
 const MAINLINE_OBJECTS = Object.freeze({
-  'review-ledger': 'stadium-office',
-  'choose-training': 'coach',
-  'choose-opponent': 'stadium-office',
-  'choose-market': 'shop',
-  'prepare-facility': 'pitch-prep',
-  'welcome-opponent': 'guest-gate',
-  'play-match': 'match-center'
+  'episode-notice': 'stadium-office',
+  'episode-promises': 'coach',
+  'episode-funding': 'pitch-prep',
+  'episode-offer': 'stadium-office',
+  'episode-match': 'match-center'
 });
 
 const ACTION_COPY = Object.freeze({
-  'review-ledger': { title: '账本上的缺口', goal: '去主赛场办公室看本周账本。沈峤正在等你。' },
-  'choose-training': { title: '谁能上场', goal: '到旧训练场决定本周训练重点。' },
-  'choose-opponent': { title: '邀请谁来', goal: '去主赛场办公室确认第一支外队。' },
-  'choose-market': { title: '看台之外', goal: '回场边小店安排周末集市。' },
-  'prepare-facility': { title: '比赛前夜', goal: '在主赛场决定本周最重要的设施准备。' },
-  'welcome-opponent': { title: '客队抵达', goal: '去主赛场客队通道完成接待。' },
-  'play-match': { title: '第一场主场周赛', goal: '走到草场边，开始今天的比赛。' }
+  'episode-notice': { title: '空白通知', goal: '去主赛场办公室看看那张还没有名字的通知。' },
+  'episode-promises': { title: '门外的七号', goal: '去旧训练场找小满。今天只能先答应两件事。' },
+  'episode-promise': { title: '只来得及两件事', goal: '在两个答应过的请求中，亲自完成今天这一件。' },
+  'episode-funding': { title: '灯亮以前', goal: '到主赛场边决定灯光和小满下一周的工作。' },
+  'episode-offer': { title: '沈峤的旧球员证', goal: '去主赛场办公室听完沈峤给出的真工作。' },
+  'episode-match': { title: '比赛与五把椅子', goal: '走到中圈。比赛以后，让小满先说自己的选择。' }
 });
+
+const STORY_PROP_MAP = Object.freeze({ 'player-card': 'card' });
+const STORY_PORTRAIT_MAP = Object.freeze({ 'aunt-xu': 'xu' });
+
+function isEpisodeDayResolved() {
+  if (!isManagementWeekDay(state.dayIndex)) return false;
+  if (state.dayIndex === 3) return state.episode.sceneHistory.includes('blank-notice');
+  if (state.dayIndex === 4) return state.episode.promisesChosen.length === 2;
+  if ([5, 6].includes(state.dayIndex)) {
+    return state.management.dailyRecords.some(record => record.dayIndex === state.dayIndex && record.actionId === 'episode-promise');
+  }
+  if (state.dayIndex === 7) return Boolean(state.episode.fridayFundingChoice);
+  if (state.dayIndex === 8) return state.episode.shenOffer !== 'undecided';
+  if (state.dayIndex === 9) return Boolean(state.episode.hearingChoice);
+  return false;
+}
+
+function pendingPromiseIds() {
+  return state.episode.promisesChosen.filter(id => !state.episode.promisesCompleted.includes(id));
+}
 
 function rebuildWorldObjects() {
   const map = getMap(activeMapId);
   const objects = {};
   const requiredAction = getRequiredAction(state.dayIndex);
   const requiredObjectId = MAINLINE_OBJECTS[requiredAction];
+  const promiseObjectIds = new Map();
+  if ([5, 6].includes(state.dayIndex)) {
+    for (const promiseId of pendingPromiseIds()) {
+      promiseObjectIds.set(PROMISES[promiseId].worldObjectId, promiseId);
+    }
+  }
 
   for (const object of getMapObjects(activeMapId)) {
     if (isPrologueDay(state.dayIndex)) {
       objects[object.id] = { ...object };
+    } else if (promiseObjectIds.has(object.id)) {
+      const promiseId = promiseObjectIds.get(object.id);
+      objects[object.id] = {
+        ...object,
+        kind: 'mainline',
+        actionId: `promise:${promiseId}`,
+        label: PROMISES[promiseId].label
+      };
     } else if (object.id === requiredObjectId) {
       objects[object.id] = {
         ...object,
         kind: 'mainline',
         actionId: requiredAction,
-        label: state.management.completedActions.includes(requiredAction)
+        label: isEpisodeDayResolved()
           ? '今天的决定已经完成'
-          : object.label
+          : requiredAction === 'episode-promises'
+            ? '去看小满的七号背心'
+            : ACTION_COPY[requiredAction].goal
       };
     }
   }
@@ -156,7 +207,7 @@ function rebuildWorldObjects() {
   }
 
   const schedules = isManagementWeekDay(state.dayIndex)
-    ? getNpcSchedule(state.dayIndex, state.phase, { opponentId: state.management.opponentId })
+    ? getNpcSchedule(state.dayIndex, state.phase, { opponentId: state.management.opponentId, episode: state.episode })
     : [];
   for (const npc of schedules.filter(item => item.mapId === activeMapId)) {
     const guestSide = activeMapId === 'stadium' && npc.x < 15 && npc.y < 50;
@@ -224,12 +275,19 @@ function canStand(x, y) {
 }
 
 function availableObject(id) {
-  if (!hasStarted || trainingActive || state.phase !== 'morning') return false;
+  if (!hasStarted || trainingActive || activeEpisodeActivity || storySceneId || state.phase !== 'morning') return false;
   if (GATHERABLES[id] && state.collectedToday.includes(id)) return false;
   const object = worldObjects[id];
   if (!object) return false;
   if (isManagementWeekDay(state.dayIndex) && object.kind === 'mainline') {
-    return !state.management.completedActions.includes(object.actionId);
+    if (object.actionId.startsWith('promise:')) {
+      const promiseId = object.actionId.split(':')[1];
+      return [5, 6].includes(state.dayIndex)
+        && state.episode.promisesChosen.includes(promiseId)
+        && !state.episode.promisesCompleted.includes(promiseId)
+        && !isEpisodeDayResolved();
+    }
+    return !isEpisodeDayResolved();
   }
   return true;
 }
@@ -292,16 +350,20 @@ function phaseDetails() {
   if (isManagementWeekDay(state.dayIndex)) {
     const actionId = getRequiredAction(state.dayIndex);
     const action = ACTION_COPY[actionId];
-    const completed = state.management.completedActions.includes(actionId);
+    const completed = isEpisodeDayResolved();
+    const remaining = pendingPromiseIds().map(id => PROMISES[id].label);
+    const promiseGoal = remaining.length
+      ? `还答应了：${remaining.join('、')}。去对应的场地亲自完成一件。`
+      : action.goal;
     return {
-      title: state.management.weekComplete ? '第一周已经结算' : state.phase === 'complete' ? '今天的决定已经记下' : action.title,
+      title: state.management.weekComplete ? '第一周已经结算' : state.phase === 'complete' ? '今天的决定已经记下' : actionId === 'episode-promise' ? currentDay().title : action.title,
       goal: state.management.weekComplete
         ? '可以继续在球场走走。这一周的结果已经保存。'
         : state.phase === 'complete'
         ? state.dayIndex === 9 ? '这一周已经结算。' : '今天已经结束，可以去往下一天。'
         : completed
           ? '决定已经完成。准备好以后，收好今天的记录。'
-          : action.goal,
+          : actionId === 'episode-promise' ? promiseGoal : action.goal,
       label: '现金',
       value: `${state.economy.cash}元`,
       icon: 'item-coins'
@@ -498,7 +560,7 @@ function renderWorldTargets() {
   const shopReady = isPrologueDay(state.dayIndex) && isShopReady();
   door.classList.toggle('ready', shopReady);
   document.querySelector('[data-door-label]').textContent = isManagementWeekDay(state.dayIndex)
-    ? '安排周末集市'
+    ? worldObjects.shop?.actionId === 'promise:fundraise' ? '和许姨开店筹钱' : '场边小店'
     : shopReady ? '可以开店' : '场边小店';
 
   renderDynamicWorldContent();
@@ -547,85 +609,23 @@ function renderRepairs() {
 }
 
 function choiceLabel(actionId, choiceId) {
-  if (actionId === 'review-ledger') return '确认本周账本';
-  if (actionId === 'choose-training') return TRAINING_FOCUS[choiceId]?.label ?? choiceId;
-  if (actionId === 'choose-opponent') return OPPONENTS[choiceId]?.name ?? choiceId;
-  if (actionId === 'choose-market') return MARKET_PLANS[choiceId]?.label ?? choiceId;
-  if (actionId === 'prepare-facility') return FACILITY_PLANS[choiceId]?.label ?? choiceId;
-  if (actionId === 'welcome-opponent') return WELCOME_PLANS[choiceId]?.label ?? choiceId;
-  if (actionId === 'play-match') return '完成主场比赛';
+  if (actionId === 'episode-notice') return '先听完每个人';
+  if (actionId === 'episode-promises') return choiceId.split('+').map(id => PROMISES[id]?.label ?? id).join('、');
+  if (actionId === 'episode-promise') return PROMISES[choiceId]?.label ?? choiceId;
+  if (actionId === 'episode-funding') {
+    return {
+      'pay-lights': '先付灯光复检',
+      'protect-work': '保住小满下一周的工作',
+      'shen-advance': '接受沈峤垫款',
+      'pay-both': '灯和工作都付'
+    }[choiceId] ?? choiceId;
+  }
+  if (actionId === 'episode-offer') return '让小满自己回答';
+  if (actionId === 'episode-match') return '完成比赛与听证';
   return choiceId;
 }
 
 function getDecisionConfig(actionId) {
-  if (actionId === 'review-ledger') {
-    return {
-      kicker: '春 15 日 / 主赛场办公室',
-      title: '先承认账本里的缺口',
-      copy: '社区预约金暂时补上了周转，但工资和维护已经先到期。沈峤提出由澜岸体育承担后续债务。',
-      options: [{ id: 'acknowledge', label: '把账本签下来', detail: '委员会支持 +1 / 沈峤正式提出合作' }]
-    };
-  }
-  if (actionId === 'choose-training') {
-    return {
-      kicker: '春 16 日 / 旧训练场',
-      title: '这周首先练什么',
-      copy: '一次训练不可能解决所有问题。你的选择也会告诉球员，谁的风险更值得承担。',
-      options: [
-        { id: 'pressing', label: '前场压迫', detail: '进攻 +6 / 伤病风险 +2' },
-        { id: 'shape', label: '整体站位', detail: '防守 +5 / 凝聚 +2' },
-        { id: 'youth', label: '给年轻人机会', detail: '凝聚 +3 / 小满信任 +2' }
-      ]
-    };
-  }
-  if (actionId === 'choose-opponent') {
-    return {
-      kicker: '春 17 日 / 外队邀请',
-      title: '第一场周赛邀请谁',
-      copy: '强队会带来更多观众，也会放大接待成本和球队差距。',
-      options: Object.values(OPPONENTS).map(opponent => ({
-        id: opponent.id,
-        label: opponent.name,
-        detail: `${opponent.cost}元 / 预计${opponent.expectedAudience}人 / ${opponent.style}`
-      }))
-    };
-  }
-  if (actionId === 'choose-market') {
-    return {
-      kicker: '春 18 日 / 场边小店',
-      title: '比赛以外，留下什么',
-      copy: '周末的热闹需要有人愿意提前来，也需要球场愿意为社区让出位置。',
-      options: Object.entries(MARKET_PLANS).map(([id, plan]) => ({
-        id,
-        label: plan.label,
-        detail: `${plan.cost}元 / 观众 +${plan.audience} / 社区 +${plan.community}`
-      }))
-    };
-  }
-  if (actionId === 'prepare-facility') {
-    return {
-      kicker: '春 19 日 / 主赛场',
-      title: '钱只能先花在一处',
-      copy: '灯光、看台和草皮都需要修。周日会直接看出你先保护了谁。',
-      options: Object.entries(FACILITY_PLANS).map(([id, plan]) => ({
-        id,
-        label: plan.label,
-        detail: `${plan.cost}元 / 球场 +${plan.condition} / 观众 +${plan.audience || 0}`
-      }))
-    };
-  }
-  if (actionId === 'welcome-opponent') {
-    return {
-      kicker: '春 20 日 / 客队通道',
-      title: '用什么方式迎接客队',
-      copy: '正式流程让评审看见专业，社区迎接则让比赛先成为大家的事。',
-      options: Object.entries(WELCOME_PLANS).map(([id, plan]) => ({
-        id,
-        label: plan.label,
-        detail: `${plan.cost}元 / 观众 +${plan.audience} / 社区 +${plan.community}`
-      }))
-    };
-  }
   if (actionId === 'resolve-shortfall') {
     return {
       kicker: '现金周转',
@@ -649,15 +649,176 @@ function renderDecisionPanel() {
   document.querySelector('[data-decision-title]').textContent = config.title;
   document.querySelector('[data-decision-copy]').textContent = config.copy;
   const ledger = document.querySelector('[data-ledger-preview]');
-  ledger.hidden = decisionAction !== 'review-ledger';
-  ledger.innerHTML = decisionAction === 'review-ledger'
-    ? state.economy.entries.map(entry => `<div><span>${entry.label}</span><strong>${entry.amount > 0 ? '+' : ''}${entry.amount} 元</strong></div>`).join('')
-      + `<div><span>现在可用</span><strong>${state.economy.cash} 元</strong></div>`
-    : '';
+  ledger.hidden = true;
+  ledger.replaceChildren();
   document.querySelector('[data-decision-close]').hidden = decisionAction === 'resolve-shortfall';
   document.querySelector('[data-decision-options]').innerHTML = config.options.map(option => (
     `<button type="button" data-decision-choice="${option.id}"><strong>${option.label}</strong><small>${option.detail}</small></button>`
   )).join('');
+}
+
+function openStoryScene(sceneId, { readOnly = false } = {}) {
+  storySceneId = sceneId;
+  storyReadOnly = readOnly;
+  promiseDraft = state.episode.promisesChosen.length ? [...state.episode.promisesChosen] : [];
+  decisionAction = null;
+  destination = null;
+  pendingInteraction = null;
+  movementRoute = [];
+  notes.hidden = true;
+  render();
+}
+
+function storyOption(id, label, detail = '', disabled = false) {
+  return `<button type="button" data-story-action="${id}"${disabled ? ' disabled' : ''}><strong>${label}</strong>${detail ? `<small>${detail}</small>` : ''}</button>`;
+}
+
+function renderStoryScene() {
+  storyScene.hidden = !storySceneId;
+  if (!storySceneId) return;
+  const scene = getStoryScene(storySceneId);
+  const day = currentDay();
+  const portrait = document.querySelector('[data-story-portrait]');
+  const prop = document.querySelector('[data-story-prop]');
+  portrait.dataset.character = STORY_PORTRAIT_MAP[scene.portraitId] ?? scene.portraitId;
+  prop.dataset.prop = STORY_PROP_MAP[scene.propId] ?? scene.propId;
+  document.querySelector('[data-story-kicker]').textContent = `${day.weekday} / 春 ${day.date} 日`;
+  document.querySelector('[data-story-speaker]').textContent = scene.speaker;
+  document.querySelector('[data-story-beats]').innerHTML = scene.beats.map(beat => `<p>${beat}</p>`).join('');
+  const captions = {
+    notice: '名字那一栏仍然空着',
+    bib: '门外那件褪色的七号背心',
+    card: '沈峤二十年前的旧球员证',
+    chairs: '中圈里正好放着五把椅子'
+  };
+  document.querySelector('[data-story-prop-caption]').textContent = captions[prop.dataset.prop];
+
+  const picker = document.querySelector('[data-promise-picker]');
+  const choosingPromises = storySceneId === 'seven-bib' && !storyReadOnly && !state.episode.promisesChosen.length;
+  picker.hidden = !choosingPromises;
+  picker.innerHTML = choosingPromises
+    ? Object.values(PROMISES).map(promise => {
+        const selected = promiseDraft.includes(promise.id);
+        const detail = promise.id === 'train'
+          ? '在旧训练场陪小满传三次球'
+          : promise.id === 'fundraise'
+            ? '在场边小店照顾三位客人'
+            : '去主赛场办公室找三条旧记录';
+        return `<button type="button" data-promise-pick="${promise.id}" aria-pressed="${selected}"><strong>${promise.label}</strong><small>${detail}</small></button>`;
+      }).join('')
+    : '';
+
+  let options = '';
+  if (!storyReadOnly && storySceneId === 'blank-notice') {
+    options = storyOption('acknowledge-notice', '先听完每个人', '不在空白处写下任何名字');
+  }
+  if (choosingPromises) {
+    options = storyOption('confirm-promises', promiseDraft.length === 2 ? '就先答应这两件事' : `还要选择 ${2 - promiseDraft.length} 件`, '第三件事会成为本周没有来得及回应的请求', promiseDraft.length !== 2);
+  }
+  if (!storyReadOnly && storySceneId === 'friday-funding') {
+    const canPayBoth = state.episode.fundraisingTotal >= 48;
+    options = [
+      storyOption('funding:pay-lights', '先付灯光复检', '周日球场能亮，小满下一周的工作暂停'),
+      storyOption('funding:protect-work', '保住小满下一周的工作', '灯光复检延后，球场要承担比赛风险'),
+      storyOption('funding:shen-advance', '接受沈峤的垫款', '两笔都能付，但他取得书面干预权'),
+      storyOption('funding:pay-both', canPayBoth ? '用筹款把两笔都付了' : '筹款还不够付两笔', canPayBoth ? '只有公开筹款达到 48 元才能做到' : `现在只筹到 ${state.episode.fundraisingTotal} 元`, !canPayBoth)
+    ].join('');
+  }
+  if (!storyReadOnly && storySceneId === 'shen-offer') {
+    options = storyOption('acknowledge-offer', '听完，让小满自己回答', state.episode.truthKnown ? '旧球员证已经证明沈峤当年也被丢下过' : '这份工作是真的，他的旧事仍只说了一半');
+  }
+  if (!storyReadOnly && storySceneId === 'sunday-match') {
+    options = storyOption('start-match', '走进主场', '海岬大学联队已经在另一侧热身');
+  }
+  document.querySelector('[data-story-options]').innerHTML = options;
+}
+
+function startEpisodePromiseActivity(promiseId) {
+  if (!state.episode.promisesChosen.includes(promiseId) || state.episode.promisesCompleted.includes(promiseId)) return false;
+  activePromiseId = promiseId;
+  activeEpisodeActivity = createEpisodeActivity(promiseId);
+  storySceneId = null;
+  destination = null;
+  pendingInteraction = null;
+  movementRoute = [];
+  render();
+  return true;
+}
+
+function finishEpisodePromiseActivity(fundraisingMode = null) {
+  if (!activeEpisodeActivity?.complete || !activePromiseId) return false;
+  const previous = state;
+  const payload = activePromiseId === 'fundraise' ? { fundraisingMode } : {};
+  state = completeEpisodePromise(state, activePromiseId, payload);
+  const changed = state !== previous;
+  if (changed) {
+    showToast(state.journal.at(-1)?.text);
+    persist();
+  }
+  activeEpisodeActivity = null;
+  activePromiseId = null;
+  decisionAction = state.management.shortfallPending ? 'resolve-shortfall' : null;
+  render();
+  return changed;
+}
+
+function renderEpisodeActivity() {
+  episodeActivity.hidden = !activeEpisodeActivity;
+  if (!activeEpisodeActivity) return;
+  const promise = PROMISES[activePromiseId];
+  document.querySelector('[data-activity-title]').textContent = promise.activityTitle;
+  const stage = document.querySelector('[data-activity-stage]');
+  let progress = '';
+
+  if (activeEpisodeActivity.type === 'train') {
+    progress = `${activeEpisodeActivity.step} / 3`;
+    if (activeEpisodeActivity.complete) {
+      const clean = activeEpisodeActivity.attempts.filter(attempt => attempt.quality === 'clean').length;
+      stage.innerHTML = `<h3>三次球都传回来了</h3><p>小满记住的不是准不准，而是你真的来了。干净传球 ${clean} 次。</p><button type="button" data-activity-finish>坐在边线聊一会儿</button>`;
+    } else {
+      const labels = ['第一次：把球送到他脚边', '第二次：让他转身接球', '第三次：让他自己选择方向'];
+      const feedback = activeEpisodeActivity.attempts.at(-1)?.quality;
+      const feedbackCopy = feedback === 'clean' ? '上一球很干净。' : feedback === 'close' ? '上一球擦着他的步点。' : feedback ? '上一球慢了一点，他还是追上了。' : '';
+      stage.innerHTML = `<h3>${labels[activeEpisodeActivity.step]}</h3><p>${feedbackCopy}选一个你想送到的位置，不完美也会继续。</p><div class="pass-targets"><button type="button" data-pass-value="0.22">传到左脚</button><button type="button" data-pass-value="0.50">传到正前</button><button type="button" data-pass-value="0.78">传到右脚</button></div>`;
+    }
+  }
+
+  if (activeEpisodeActivity.type === 'fundraise') {
+    progress = `${activeEpisodeActivity.customersServed} / 3`;
+    if (activeEpisodeActivity.complete) {
+      stage.innerHTML = `<h3>三位客人都拿到了需要的东西</h3><p>许姨问，铁盒里的钱要不要公开说成“小满留下来的筹款”。</p><div class="activity-choices"><button type="button" data-fundraising-mode="public">公开筹款 48 元</button><button type="button" data-fundraising-mode="private">只算小店收入 30 元</button></div>`;
+    } else {
+      const order = activeEpisodeActivity.orders[activeEpisodeActivity.step];
+      stage.innerHTML = `<h3>${order.customer}想要${order.label}</h3><p>看清这一位客人真正需要什么。选错不会扣钱，但队伍不会往前走。</p><div class="activity-choices"><button type="button" data-fundraiser-item="tea">青草茶</button><button type="button" data-fundraiser-item="fruit">果子水</button><button type="button" data-fundraiser-item="towel">干净毛巾</button></div>`;
+    }
+  }
+
+  if (activeEpisodeActivity.type === 'records') {
+    progress = `${activeEpisodeActivity.cluesFound.length} / 3`;
+    if (activeEpisodeActivity.complete) {
+      stage.innerHTML = `<h3>三个地方指向同一个人</h3><p>日期、签字和旧照片放在一起。二十年前被空白通知留下的人，就是沈峤。</p><button type="button" data-activity-finish>把旧球员证收好</button>`;
+    } else {
+      const clueLabels = { signature: '核对通知签字', date: '翻看离队日期', photo: '比对旧队合照' };
+      stage.innerHTML = `<h3>旧柜子里有三处不一致</h3><p>顺序不重要。把签字、日期和照片都看过，旧事才会完整。</p><div class="archive-clues">${ARCHIVE_CLUES.map(id => `<button type="button" data-archive-clue="${id}"${activeEpisodeActivity.cluesFound.includes(id) ? ' disabled' : ''}>${activeEpisodeActivity.cluesFound.includes(id) ? '已经看过：' : ''}${clueLabels[id]}</button>`).join('')}</div>`;
+    }
+  }
+
+  document.querySelector('[data-activity-progress]').textContent = progress;
+}
+
+function renderHearing() {
+  const active = Boolean(state.dayIndex === 9 && state.management?.matchResult && !state.episode.hearingChoice);
+  hearingPanel.hidden = !active;
+  if (!active) return;
+  const xiaoman = state.episode.xiaomanDecision === 'stay-trial'
+    ? '小满说：我愿意按自己的条件再留一周。下一次讨论我时，我要在场。'
+    : '小满说：那份工作我会去。我不是因为你们说我不够好才走。';
+  document.querySelector('[data-hearing-copy]').textContent = `${xiaoman} 现在要决定的，是以后谁能替球场签字。`;
+  document.querySelector('[data-hearing-options]').innerHTML = [
+    storyOption('hearing:manager-signs', '由经营者最后签字', '责任集中，也意味着其他人只能在决定以后知道'),
+    storyOption('hearing:coach-decides', '涉及球队时由教练决定', '保护专业判断，但小店和社区仍没有席位'),
+    storyOption('hearing:five-party-week', '每周召开一次五方会议', '教练、队员、小店、社区和安若童各有一把椅子')
+  ].join('');
 }
 
 function renderMatchPanel() {
@@ -668,20 +829,38 @@ function renderMatchPanel() {
   const opponent = getOpponent(state.management.opponentId);
   document.querySelector('[data-match-score]').textContent = `${match.homeGoals} : ${match.awayGoals}`;
   document.querySelector('[data-match-opponent]').textContent = opponent.name;
-  const highlight = HIGHLIGHTS[match.highlightIndex];
+  const highlight = getAvailableHighlights(match, state.episode);
   document.querySelector('[data-match-minute]').textContent = `第 ${highlight.minute} 分钟`;
   document.querySelector('[data-match-title]').textContent = highlight.title;
   document.querySelector('[data-match-copy]').textContent = highlight.copy;
   document.querySelector('[data-match-options]').innerHTML = highlight.choices.map(choice => (
-    `<button type="button" data-highlight-choice="${choice.id}"><strong>${choice.label}</strong><small>这个决定会立即改变场上局面</small></button>`
+    `<button type="button" data-highlight-choice="${choice.id}"><strong>${choice.label}</strong><small>${choice.detail}</small></button>`
   )).join('');
 }
 
 function renderManagementMetrics() {
   const active = isManagementWeekDay(state.dayIndex);
   const metrics = document.querySelector('[data-management-metrics]');
-  metrics.hidden = !active;
+  const care = document.querySelector('[data-weekly-care]');
+  metrics.hidden = !active || !ledgerOpen;
+  care.hidden = !active;
   if (!active) return;
+  const careCopy = state.management.weekComplete
+    ? ['这一周留下的决定', state.management.settlement.character.nextCrisis]
+    : state.dayIndex === 3
+    ? ['空白通知还没有名字', '先听完每个人']
+    : state.dayIndex === 4
+      ? ['小满的七号背心', state.episode.promisesChosen.length ? '两项承诺已经写下' : '只能先答应两件事']
+      : [5, 6].includes(state.dayIndex)
+        ? ['答应过的两件事', `已经完成 ${state.episode.promisesCompleted.length} / 2`]
+        : state.dayIndex === 7
+          ? ['灯光和一个人的工作', state.episode.missedRequest ? `没来得及：${PROMISES[state.episode.missedRequest].label}` : '周五以前必须取舍']
+          : state.dayIndex === 8
+            ? ['沈峤的旧球员证', state.episode.truthKnown ? '旧记录已经对上' : '他当年也被不公平对待']
+            : ['小满要自己回答', state.management.matchResult ? '五把椅子正在等' : '先把比赛踢完'];
+  document.querySelector('[data-care-title]').textContent = careCopy[0];
+  document.querySelector('[data-care-progress]').textContent = careCopy[1];
+  document.querySelector('[data-ledger-toggle]').textContent = ledgerOpen ? '收起账本' : '查看账本';
   document.querySelector('[data-metric="cash"]').textContent = `${state.economy.cash}元`;
   document.querySelector('[data-metric="facility"]').textContent = state.facilities.condition;
   document.querySelector('[data-metric="cohesion"]').textContent = state.roster.cohesion;
@@ -696,9 +875,12 @@ function renderManagementControls() {
     return;
   }
   const actionId = getRequiredAction(state.dayIndex);
-  button.hidden = !state.management.completedActions.includes(actionId)
+  button.hidden = !isEpisodeDayResolved()
     || state.management.shortfallPending
-    || Boolean(decisionAction);
+    || Boolean(decisionAction)
+    || Boolean(storySceneId)
+    || Boolean(activeEpisodeActivity)
+    || !hearingPanel.hidden;
   button.textContent = state.dayIndex === 9 ? '结算这一周' : '收好今天的决定';
 }
 
@@ -716,9 +898,15 @@ function renderSummary() {
     const actionId = getRequiredAction(state.dayIndex);
     document.querySelector('[data-summary-date]').textContent = `${day.weekday} / 春 ${day.date} 日`;
     document.querySelector('[data-summary-title]').textContent = ACTION_COPY[actionId].title;
-    document.querySelector('[data-summary-copy]').textContent = state.dayIndex === 8
-      ? '客队已经住下。明天的比分会被看见，但今天的接待方式也会留在大家的判断里。'
-      : '决定已经记入本周账本。它不会单独决定球场的命运，但会改变下一天的余地。';
+    const dayCopies = {
+      3: '通知上的名字仍然空着。今天没有解决问题，但大家第一次知道自己可以先说话。',
+      4: '你只答应了两件事。第三个请求没有消失，它只是开始等待。',
+      5: '第一件承诺已经亲自做完。剩下的时间只够再回应一个人。',
+      6: '两件承诺都做完了。没被选中的那件事，会在明天成为真正的代价。',
+      7: '灯光和一个人的下一周被写进同一张账单。你留下了清楚的先后顺序。',
+      8: '沈峤给出的是一份真实工作。小满没有让任何人替他回答。'
+    };
+    document.querySelector('[data-summary-copy]').textContent = dayCopies[state.dayIndex] ?? '今天的选择已经留下。';
     document.querySelector('[data-summary-label="orders"]').textContent = '决定';
     document.querySelector('[data-summary-label="repair"]').textContent = '现金';
     document.querySelector('[data-summary-label="money"]').textContent = '社区';
@@ -759,9 +947,15 @@ function renderWeekSummary() {
   const settlement = state.management.settlement;
   const opponent = getOpponent(state.management.opponentId);
   const outcomeCopy = settlement.outcome === 'win' ? '赢下' : settlement.outcome === 'draw' ? '战平' : '输给';
-  document.querySelector('[data-week-summary-title]').textContent = '球场撑过了第一周';
-  document.querySelector('[data-week-summary-copy]').textContent = `海风球场${outcomeCopy}${opponent.name}。比赛带来了${settlement.audience}名观众，也让委员会第一次有了继续经营的完整账目。`;
+  const character = settlement.character;
+  document.querySelector('[data-week-summary-title]').textContent = character.xiaomanDecision === 'stay-trial' ? '小满决定再留一周' : '小满决定接受那份工作';
+  document.querySelector('[data-week-summary-copy]').textContent = `海风球场${outcomeCopy}${opponent.name}，来了${settlement.audience}名观众。比分已经结束，但这一周真正留下的是谁能替别人作决定。`;
   document.querySelector('[data-week-score]').textContent = `海风球场 ${settlement.score.home} : ${settlement.score.away} ${opponent.shortName}`;
+  document.querySelector('[data-week-xiaoman]').textContent = character.xiaomanCopy;
+  document.querySelector('[data-week-missed]').textContent = character.missedCopy;
+  document.querySelector('[data-week-shen]').textContent = character.shenAdvantage;
+  document.querySelector('[data-week-next-crisis]').textContent = character.nextCrisis;
+  document.querySelector('.week-next').textContent = `下周：${character.nextCrisis}`;
   const items = [
     ['现金', `${settlement.metrics.cash}元`],
     ['球场', settlement.metrics.facility],
@@ -787,9 +981,11 @@ function renderChapterSummary() {
 function renderTraining() {
   root.classList.toggle('training-active', trainingActive);
   trainingLayer.hidden = !trainingActive;
-  const managementModal = Boolean(decisionAction);
+  const hearingActive = Boolean(state.dayIndex === 9 && state.management?.matchResult && !state.episode.hearingChoice);
+  const managementModal = Boolean(decisionAction || storySceneId || activeEpisodeActivity || hearingActive);
   touchControls.hidden = trainingActive || state.phase !== 'morning' || managementModal;
   touchAction.hidden = trainingActive || state.phase !== 'morning' || managementModal;
+  if (managementModal) prompt.hidden = true;
   if (!trainingActive || !trainingSession) return;
 
   const target = TRAINING_TARGETS[trainingSession.shotIndex];
@@ -809,10 +1005,10 @@ function renderStartCard() {
   startCard.dataset.hasSave = String(loaded.ok);
   continueButton.hidden = !loaded.ok;
   document.querySelector('[data-save-summary]').textContent = loaded.ok
-    ? `存档停在春 ${currentDay().date} 日。可以继续原进度，也可以直接从主赛场的第一份账本开始。`
+    ? `存档停在春 ${currentDay().date} 日。可以继续原进度，也可以直接从那张空白通知开始。`
     : loaded.reason === 'absent'
-      ? '新内容从春 15 日开始：经营大球场、邀请外队、处理现金缺口，并完成第一场主场周赛。'
-      : '上次存档无法读取。可以直接体验经营周，或从抵达的早晨重新开始。';
+      ? '新内容从春 15 日开始：一张空白通知、只能完成的两项承诺，以及周日中圈的五把椅子。'
+      : '上次存档无法读取。可以直接进入第一周故事，或从抵达的早晨重新开始。';
 }
 
 function renderModals() {
@@ -820,13 +1016,19 @@ function renderModals() {
   renderChapterSummary();
   renderWeekSummary();
   renderDecisionPanel();
+  renderStoryScene();
+  renderEpisodeActivity();
   renderMatchPanel();
+  renderHearing();
   renderStartCard();
   summaryDim.hidden = summary.hidden
     && chapterSummary.hidden
     && weekSummary.hidden
     && decisionPanel.hidden
+    && storyScene.hidden
+    && episodeActivity.hidden
     && matchPanel.hidden
+    && hearingPanel.hidden
     && startCard.hidden;
 }
 
@@ -834,6 +1036,7 @@ function render() {
   root.dataset.phase = state.phase;
   root.dataset.day = String(state.dayIndex);
   root.dataset.mode = isManagementWeekDay(state.dayIndex) ? 'management' : 'prologue';
+  root.dataset.campaign = String(isManagementWeekDay(state.dayIndex));
   const details = phaseDetails();
   renderCalendar();
   document.querySelector('[data-time]').textContent = formatTime(state.minute);
@@ -850,7 +1053,7 @@ function render() {
 
   const optional = document.querySelector('[data-optional-event]');
   if (isManagementWeekDay(state.dayIndex)) {
-    const talked = getNpcSchedule(state.dayIndex, 'morning', { opponentId: state.management.opponentId })
+    const talked = getNpcSchedule(state.dayIndex, 'morning', { opponentId: state.management.opponentId, episode: state.episode })
       .filter(npc => state.events.includes(`talk-${npc.id}-day-${state.dayIndex}`))
       .map(npc => npc.name);
     optional.classList.toggle('complete', talked.length > 0);
@@ -925,35 +1128,66 @@ function openManagementAction(actionId) {
   destination = null;
   pendingInteraction = null;
   movementRoute = [];
-  if (actionId === 'play-match') {
-    const previousMatch = state.management.match;
-    state = startWeeklyMatch(state);
-    if (!state.management.match) {
-      showToast(state.journal.at(-1)?.text);
-      render();
-      return false;
-    }
-    decisionAction = 'play-match';
-    if (state.management.match !== previousMatch) persist();
-  } else {
-    decisionAction = actionId;
+  if (actionId.startsWith('promise:')) {
+    return startEpisodePromiseActivity(actionId.split(':')[1]);
   }
-  render();
+  if (actionId === 'episode-match' && state.management.match && !state.management.matchResult) {
+    decisionAction = 'play-match';
+    render();
+    return true;
+  }
+  openStoryScene(getEpisodeDay(state.dayIndex).sceneId);
   return true;
 }
 
 function applyDecisionChoice(choiceId) {
   if (!decisionAction || decisionAction === 'play-match') return false;
   const previous = state;
-  state = decisionAction === 'resolve-shortfall'
-    ? resolveManagementShortfall(state, choiceId)
-    : completeRequiredAction(state, decisionAction, choiceId);
+  state = decisionAction === 'resolve-shortfall' ? resolveManagementShortfall(state, choiceId) : state;
   const changed = state !== previous;
   if (changed) {
     showToast(state.journal.at(-1)?.text);
     persist();
   }
   decisionAction = state.management.shortfallPending ? 'resolve-shortfall' : null;
+  render();
+  return changed;
+}
+
+function applyStoryAction(actionId) {
+  const previous = state;
+  if (actionId === 'acknowledge-notice') {
+    state = acknowledgeEpisodeNotice(state);
+  } else if (actionId === 'confirm-promises') {
+    if (promiseDraft.length !== 2) return false;
+    state = chooseEpisodePromises(state, promiseDraft);
+  } else if (actionId.startsWith('funding:')) {
+    state = resolveEpisodeFunding(state, actionId.split(':')[1]);
+  } else if (actionId === 'acknowledge-offer') {
+    state = acknowledgeEpisodeOffer(state);
+  } else if (actionId === 'start-match') {
+    state = startWeeklyMatch(state);
+    if (!state.management.match) {
+      showToast(state.journal.at(-1)?.text);
+      render();
+      return false;
+    }
+    storySceneId = null;
+    decisionAction = 'play-match';
+  } else if (actionId.startsWith('hearing:')) {
+    state = completeEpisodeHearing(state, actionId.split(':')[1]);
+  } else {
+    return false;
+  }
+
+  const changed = state !== previous;
+  if (changed) {
+    storySceneId = null;
+    storyReadOnly = false;
+    showToast(state.journal.at(-1)?.text);
+    persist();
+  }
+  if (state.management.shortfallPending) decisionAction = 'resolve-shortfall';
   render();
   return changed;
 }
@@ -1099,6 +1333,9 @@ function advanceMovement(deltaSeconds, timestamp) {
   if (!hasStarted
     || trainingActive
     || decisionAction
+    || storySceneId
+    || activeEpisodeActivity
+    || !hearingPanel.hidden
     || state.phase !== 'morning'
     || !summary.hidden
     || !chapterSummary.hidden
@@ -1208,6 +1445,10 @@ function enterManagementWeek(nextState) {
   pendingInteraction = null;
   movementRoute = [];
   decisionAction = null;
+  storySceneId = null;
+  activeEpisodeActivity = null;
+  activePromiseId = null;
+  ledgerOpen = false;
   directWeekArmed = false;
   weekSummaryDismissed = false;
   window.clearTimeout(speechTimer);
@@ -1216,7 +1457,7 @@ function enterManagementWeek(nextState) {
   persist();
   render();
   fitWorld();
-  showToast('春15日。主赛场的账本已经摊开。');
+  showToast('春15日。办公室里有一张没有名字的通知。');
   return true;
 }
 
@@ -1254,6 +1495,10 @@ function goToNextDay() {
     speech.hidden = true;
     notes.hidden = true;
     prompt.hidden = false;
+    storySceneId = null;
+    activeEpisodeActivity = null;
+    activePromiseId = null;
+    decisionAction = null;
   }
   if (successful) persist();
   render();
@@ -1277,13 +1522,19 @@ function resetGame() {
   chapterResetArmed = false;
   weekResetArmed = false;
   decisionAction = null;
+  storySceneId = null;
+  storyReadOnly = false;
+  promiseDraft = [];
+  activeEpisodeActivity = null;
+  activePromiseId = null;
+  ledgerOpen = false;
   weekSummaryDismissed = false;
   speech.hidden = true;
   notes.hidden = true;
   toastHost.replaceChildren();
   prompt.hidden = false;
   document.querySelector('[data-new-game]').textContent = '从抵达序章开始';
-  document.querySelector('[data-direct-week]').textContent = '直接进入经营周';
+  document.querySelector('[data-direct-week]').textContent = '直接进入春 15 日';
   document.querySelector('[data-chapter-restart]').textContent = '从抵达那天重新开始';
   document.querySelector('[data-week-restart]').textContent = '从序章重新开始';
   render();
@@ -1359,6 +1610,83 @@ document.querySelector('[data-decision-close]').addEventListener('click', () => 
   render();
 });
 
+document.querySelector('[data-story-options]').addEventListener('click', event => {
+  const button = event.target.closest('[data-story-action]');
+  if (button && !button.disabled) applyStoryAction(button.dataset.storyAction);
+});
+
+document.querySelector('[data-promise-picker]').addEventListener('click', event => {
+  const button = event.target.closest('[data-promise-pick]');
+  if (!button) return;
+  const promiseId = button.dataset.promisePick;
+  if (promiseDraft.includes(promiseId)) {
+    promiseDraft = promiseDraft.filter(id => id !== promiseId);
+  } else if (promiseDraft.length < 2) {
+    promiseDraft = [...promiseDraft, promiseId];
+  } else {
+    showToast('今天只能先答应两件事。可以先取消一件。');
+  }
+  renderStoryScene();
+});
+
+document.querySelector('[data-story-close]').addEventListener('click', () => {
+  storySceneId = null;
+  storyReadOnly = false;
+  render();
+  viewport.focus();
+});
+
+document.querySelector('[data-episode-activity]').addEventListener('click', event => {
+  const pass = event.target.closest('[data-pass-value]');
+  if (pass && activeEpisodeActivity?.type === 'train') {
+    activeEpisodeActivity = takePass(activeEpisodeActivity, Number(pass.dataset.passValue));
+    renderEpisodeActivity();
+    return;
+  }
+  const item = event.target.closest('[data-fundraiser-item]');
+  if (item && activeEpisodeActivity?.type === 'fundraise') {
+    const previousStep = activeEpisodeActivity.step;
+    activeEpisodeActivity = serveFundraiser(activeEpisodeActivity, item.dataset.fundraiserItem);
+    if (activeEpisodeActivity.step === previousStep) showToast('这位客人要的不是这个。再看一眼。');
+    renderEpisodeActivity();
+    return;
+  }
+  const clue = event.target.closest('[data-archive-clue]');
+  if (clue && activeEpisodeActivity?.type === 'records') {
+    activeEpisodeActivity = inspectArchiveClue(activeEpisodeActivity, clue.dataset.archiveClue);
+    renderEpisodeActivity();
+    return;
+  }
+  const mode = event.target.closest('[data-fundraising-mode]');
+  if (mode) {
+    finishEpisodePromiseActivity(mode.dataset.fundraisingMode);
+    return;
+  }
+  if (event.target.closest('[data-activity-finish]')) finishEpisodePromiseActivity();
+});
+
+document.querySelector('[data-activity-close]').addEventListener('click', () => {
+  activeEpisodeActivity = null;
+  activePromiseId = null;
+  render();
+  viewport.focus();
+});
+
+document.querySelector('[data-hearing-options]').addEventListener('click', event => {
+  const button = event.target.closest('[data-story-action]');
+  if (button) applyStoryAction(button.dataset.storyAction);
+});
+
+document.querySelector('[data-care-open]').addEventListener('click', () => {
+  if (!isManagementWeekDay(state.dayIndex)) return;
+  openStoryScene(getEpisodeDay(state.dayIndex).sceneId, { readOnly: isEpisodeDayResolved() });
+});
+
+document.querySelector('[data-ledger-toggle]').addEventListener('click', () => {
+  ledgerOpen = !ledgerOpen;
+  renderManagementMetrics();
+});
+
 document.querySelector('[data-match-options]').addEventListener('click', event => {
   const button = event.target.closest('[data-highlight-choice]');
   if (button) applyHighlightChoice(button.dataset.highlightChoice);
@@ -1402,7 +1730,7 @@ document.querySelector('[data-continue]').addEventListener('click', () => {
 document.querySelector('[data-direct-week]').addEventListener('click', event => {
   if (loaded.ok && !directWeekArmed) {
     directWeekArmed = true;
-    event.currentTarget.textContent = '确认进入经营周';
+    event.currentTarget.textContent = '确认进入春 15 日';
     return;
   }
   startDirectManagementWeek();

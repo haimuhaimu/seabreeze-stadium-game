@@ -1,12 +1,32 @@
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { extname, join, resolve } from 'node:path';
 import { getOrders } from './daily-content.js';
 
 const chromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const pageUrl = pathToFileURL(join(import.meta.dirname, 'index.html')).href;
+const mimeTypes = { '.css': 'text/css', '.html': 'text/html', '.js': 'text/javascript', '.png': 'image/png' };
+const server = createServer(async (request, response) => {
+  try {
+    const pathname = decodeURIComponent(new URL(request.url, 'http://127.0.0.1').pathname);
+    const target = resolve(import.meta.dirname, `.${pathname === '/' ? '/index.html' : pathname}`);
+    if (!target.startsWith(import.meta.dirname)) throw new Error('Path leaves prototype');
+    const data = await readFile(target);
+    response.writeHead(200, { 'content-type': mimeTypes[extname(target)] ?? 'application/octet-stream' });
+    response.end(data);
+  } catch {
+    response.writeHead(404);
+    response.end('Not found');
+  }
+});
+await new Promise((resolveListen, rejectListen) => {
+  server.once('error', rejectListen);
+  server.listen(0, '127.0.0.1', resolveListen);
+});
+const serverAddress = server.address();
+const pageBaseUrl = `http://127.0.0.1:${serverAddress.port}/index.html`;
+const pageUrl = `${pageBaseUrl}?smoke=1`;
 const profileDir = await mkdtemp(join(tmpdir(), 'integrated-day-smoke-'));
 const debugPort = 9238;
 let navigationCount = 0;
@@ -33,7 +53,7 @@ async function waitForDebugger() {
     try {
       const response = await fetch(`http://127.0.0.1:${debugPort}/json/list`);
       const pages = await response.json();
-      const page = pages.find(item => item.type === 'page' && item.url.startsWith(pageUrl));
+      const page = pages.find(item => item.type === 'page' && item.url.startsWith(pageBaseUrl));
       if (page?.webSocketDebuggerUrl) return page.webSocketDebuggerUrl;
     } catch {}
     await sleep(100);
@@ -98,12 +118,7 @@ async function waitFor(expression, message, timeout = 20000) {
 
 async function navigate() {
   navigationCount += 1;
-  if (navigationCount === 1) {
-    const navigation = await send('Page.navigate', { url: `${pageUrl}?smoke=1` });
-    if (navigation.errorText) throw new Error(`Navigation failed: ${navigation.errorText}`);
-  } else {
-    await send('Page.reload', { ignoreCache: true });
-  }
+  await send('Page.reload', { ignoreCache: true });
   await sleep(800);
   try {
     await waitFor(
@@ -124,6 +139,8 @@ async function navigate() {
         href: location.href,
         readyState: document.readyState,
         title: document.title,
+        scripts: [...document.scripts].map(script => ({ src: script.src, type: script.type })),
+        debugReady: Boolean(window.__integratedDayDebug),
         moduleResult,
         resources: performance.getEntriesByType('resource').map(entry => entry.name)
       };
@@ -211,48 +228,14 @@ async function assertInsideViewport(selector) {
   assert(result.left >= -1 && result.top >= -1 && result.right <= result.width + 1 && result.bottom <= result.height + 1, `${selector} leaves the viewport`);
 }
 
-const managementObjects = {
-  'review-ledger': 'stadium-office',
-  'choose-training': 'coach',
-  'choose-opponent': 'stadium-office',
-  'choose-market': 'shop',
-  'prepare-facility': 'pitch-prep',
-  'welcome-opponent': 'guest-gate'
-};
-
-async function completeManagementDay(dayIndex, actionId, choiceId, { shortfallRoute = null, captureName = null } = {}) {
-  assert(
-    await evaluate(`window.__integratedDayDebug.getState().dayIndex === ${dayIndex}`),
-    `Management day ${dayIndex} did not begin`
-  );
-  const objectId = managementObjects[actionId];
-  await walkAndWait(objectId, '!document.querySelector("[data-decision-panel]").hidden');
-  await assertInsideViewport('[data-decision-panel]');
-  if (captureName) await capture(captureName);
-  await click(`[data-decision-choice="${choiceId}"]`);
-  await waitFor(
-    `window.__integratedDayDebug.getState().management.completedActions.includes(${JSON.stringify(actionId)})`,
-    `${actionId} was not recorded`
-  );
-  if (shortfallRoute) {
-    await waitFor(
-      'window.__integratedDayDebug.getState().management.shortfallPending',
-      'The expensive management path did not open cash recovery'
-    );
-    assert((await text('[data-decision-title]')).includes('账本已经低于零'), 'Cash recovery panel has the wrong title');
-    await capture('shortfall');
-    await click(`[data-decision-choice="${shortfallRoute}"]`);
-    await waitFor(
-      '!window.__integratedDayDebug.getState().management.shortfallPending',
-      'Cash recovery did not resolve the shortfall'
-    );
-  }
+async function completeEpisodeDay(dayIndex) {
+  assert(await evaluate(`window.__integratedDayDebug.getState().dayIndex === ${dayIndex}`), `Episode day ${dayIndex} did not begin`);
   await waitFor('!document.querySelector("[data-end-management-day]").hidden', 'Management day cannot be closed');
   await click('[data-end-management-day]');
-  await waitFor('window.__integratedDayDebug.getState().phase === "complete"', `Management day ${dayIndex} did not finish`);
+  await waitFor('window.__integratedDayDebug.getState().phase === "complete"', `Episode day ${dayIndex} did not finish`);
   await assertInsideViewport('[data-summary]');
   await click('[data-next-day]');
-  await waitFor(`window.__integratedDayDebug.getState().dayIndex === ${dayIndex + 1}`, `Management day ${dayIndex + 1} did not begin`);
+  await waitFor(`window.__integratedDayDebug.getState().dayIndex === ${dayIndex + 1}`, `Episode day ${dayIndex + 1} did not begin`);
 }
 
 async function testThreeDayLoop() {
@@ -266,8 +249,8 @@ async function testThreeDayLoop() {
     continueHidden: document.querySelector('[data-continue]').hidden
   })`);
   assert(launch.visible, 'A fresh profile does not show the new launch screen');
-  assert(launch.title.includes('真正的主场'), 'The launch screen does not make the new stadium visible');
-  assert(launch.directLabel === '直接进入经营周', 'The direct management-week entry is missing');
+  assert(launch.title.includes('第一周'), 'The launch screen does not make the story week visible');
+  assert(launch.directLabel === '直接进入春 15 日', 'The direct story-week entry is missing');
   assert(launch.previewLoaded, 'The main stadium preview did not load');
   assert(launch.continueHidden, 'A fresh profile should not offer an absent save');
   await assertInsideViewport('[data-start-card]');
@@ -425,27 +408,30 @@ async function testThreeDayLoop() {
     mapLoaded: document.querySelector('.world-map').naturalWidth === 1672
       && document.querySelector('.world-map').src.includes('seabreeze-main-stadium-v1.png'),
     shenVisible: Boolean(document.querySelector('[data-object="npc-shen-qiao"]')),
-    metricsVisible: !document.querySelector('[data-management-metrics]').hidden,
+    careVisible: !document.querySelector('[data-weekly-care]').hidden,
+    metricsHidden: document.querySelector('[data-management-metrics]').hidden,
     weekDays: document.querySelectorAll('[data-week-day]').length
   })`);
   assert(weekStart.date === '春 15' && weekStart.mapId === 'stadium', 'Management week did not open at the stadium on spring 15');
   assert(weekStart.mapLoaded, 'The main stadium art did not load');
   assert(weekStart.shenVisible, 'Shen Qiao is missing from the first stadium morning');
-  assert(weekStart.metricsVisible && weekStart.weekDays === 7, 'The weekly management HUD is incomplete');
+  assert(weekStart.careVisible && weekStart.metricsHidden && weekStart.weekDays === 7, 'The weekly story HUD is incomplete');
   await capture('stadium');
 
   await walkAndWait(
     'npc-shen-qiao',
     'window.__integratedDayDebug.getState().events.includes("talk-shen-qiao-day-3")'
   );
-  assert((await text('[data-speech-copy]')).includes('澜岸体育'), 'Shen Qiao does not introduce the debt proposal');
+  assert((await text('[data-speech-copy]')).includes('接下债务'), 'Shen Qiao does not introduce the debt proposal');
 
   await walkAndWait('to-training', 'window.__integratedDayDebug.getMapId() === "training"');
   await walkAndWait('to-stadium', 'window.__integratedDayDebug.getMapId() === "stadium"');
 
-  await walkAndWait('stadium-office', '!document.querySelector("[data-decision-panel]").hidden');
-  await assertInsideViewport('[data-decision-panel]');
-  await capture('ledger');
+  await walkAndWait('stadium-office', '!document.querySelector("[data-story-scene]").hidden');
+  assert((await text('[data-story-speaker]')) === '郭教练', 'The blank notice scene has the wrong speaker');
+  assert((await text('[data-story-prop-caption]')).includes('名字'), 'The blank notice prop is missing');
+  await assertInsideViewport('[data-story-scene]');
+  await capture('blank-notice');
   await send('Emulation.setDeviceMetricsOverride', {
     width: 390,
     height: 844,
@@ -453,10 +439,10 @@ async function testThreeDayLoop() {
     mobile: true
   });
   await sleep(250);
-  assert(!await evaluate('document.documentElement.scrollWidth > innerWidth'), 'Management week overflows on mobile');
-  await assertInsideViewport('[data-decision-panel]');
-  await assertInsideViewport('[data-management-metrics]');
-  await capture('management-mobile');
+  assert(!await evaluate('document.documentElement.scrollWidth > innerWidth'), 'Story week overflows on mobile');
+  await assertInsideViewport('[data-story-scene]');
+  await assertInsideViewport('[data-weekly-care]');
+  await capture('story-mobile');
   await send('Emulation.setDeviceMetricsOverride', {
     width: 1440,
     height: 900,
@@ -464,32 +450,87 @@ async function testThreeDayLoop() {
     mobile: false
   });
   await sleep(250);
-  await click('[data-decision-choice="acknowledge"]');
-  await waitFor('!document.querySelector("[data-end-management-day]").hidden', 'Ledger choice did not unlock the day ending');
-  await click('[data-end-management-day]');
-  await waitFor('window.__integratedDayDebug.getState().phase === "complete"', 'Spring 15 did not finish');
-  await click('[data-next-day]');
+  await click('[data-story-action="acknowledge-notice"]');
+  await completeEpisodeDay(3);
 
-  await completeManagementDay(4, 'choose-training', 'shape');
-  await completeManagementDay(5, 'choose-opponent', 'city-university');
-  await completeManagementDay(6, 'choose-market', 'seafood-market');
-  await completeManagementDay(7, 'prepare-facility', 'grass', { captureName: 'facility' });
-  await completeManagementDay(8, 'welcome-opponent', 'business-welcome', { shortfallRoute: 'shen' });
+  await walkAndWait('coach', '!document.querySelector("[data-story-scene]").hidden');
+  await click('[data-promise-pick="train"]');
+  await click('[data-promise-pick="fundraise"]');
+  assert(await evaluate('document.querySelectorAll("[data-promise-pick][aria-pressed=true]").length === 2'), 'Two promises were not visibly selected');
+  await click('[data-story-action="confirm-promises"]');
+  await waitFor('window.__integratedDayDebug.getState().episode.promisesChosen.length === 2', 'The two promises were not recorded');
+  await completeEpisodeDay(4);
+
+  await walkAndWait('coach', '!document.querySelector("[data-episode-activity]").hidden');
+  assert((await text('[data-activity-title]')).includes('传三次球'), 'The training promise opened the wrong activity');
+  await click('[data-pass-value="0.22"]');
+  await click('[data-pass-value="0.78"]');
+  await click('[data-pass-value="0.50"]');
+  await click('[data-activity-finish]');
+  await waitFor('window.__integratedDayDebug.getState().episode.promisesCompleted.includes("train")', 'The training promise did not complete');
+  await completeEpisodeDay(5);
+
+  await walkAndWait('shop', '!document.querySelector("[data-episode-activity]").hidden');
+  assert((await text('[data-activity-title]')).includes('场边小店'), 'The fundraiser opened the wrong activity');
+  await click('[data-fundraiser-item="fruit"]');
+  await click('[data-fundraiser-item="tea"]');
+  await click('[data-fundraiser-item="towel"]');
+  await click('[data-fundraising-mode="public"]');
+  await waitFor('window.__integratedDayDebug.getState().episode.fundraisingTotal === 48', 'Public fundraising did not reach 48');
+  await completeEpisodeDay(6);
+
+  await walkAndWait('pitch-prep', '!document.querySelector("[data-story-scene]").hidden');
+  assert(await evaluate('!document.querySelector("[data-story-action=\\"funding:pay-both\\"]").disabled'), 'Fundraising did not unlock paying both bills');
+  await capture('friday-funding');
+  await click('[data-story-action="funding:pay-both"]');
+  await waitFor('window.__integratedDayDebug.getState().episode.missedRequest === "records"', 'The unchosen records request was not remembered');
+  await completeEpisodeDay(7);
+
+  await walkAndWait('stadium-office', '!document.querySelector("[data-story-scene]").hidden');
+  assert((await text('[data-story-speaker]')) === '沈峤', 'The Saturday reversal has the wrong speaker');
+  assert((await text('[data-story-prop-caption]')).includes('旧球员证'), 'Shen Qiao old player card is missing');
+  await capture('shen-offer');
+  await click('[data-story-action="acknowledge-offer"]');
+  await waitFor('window.__integratedDayDebug.getState().episode.shenOffer === "considering"', 'Shen Qiao offer was not recorded');
+  await completeEpisodeDay(8);
 
   assert(await evaluate('window.__integratedDayDebug.getState().dayIndex === 9'), 'Match day did not begin');
-  await walkAndWait('match-center', '!document.querySelector("[data-match-panel]").hidden');
+  await walkAndWait('match-center', '!document.querySelector("[data-story-scene]").hidden');
+  await click('[data-story-action="start-match"]');
+  await waitFor('!document.querySelector("[data-match-panel]").hidden', 'The Sunday match did not start');
   await assertInsideViewport('[data-match-panel]');
   await capture('match');
-  for (const choiceId of ['patient-build', 'protect-youngster', 'press-late']) {
+  for (const choiceId of ['repeat-practice', 'ask-xiaoman', 'share-responsibility']) {
     await click(`[data-highlight-choice="${choiceId}"]`);
   }
   await waitFor('Boolean(window.__integratedDayDebug.getState().management.matchResult)', 'The match did not finish after three highlights');
   const matchResult = await evaluate('window.__integratedDayDebug.getState().management.matchResult');
-  assert(matchResult.score.home === 2 && matchResult.score.away === 1, 'The canonical management path did not produce a 2:1 match');
-  await click('[data-end-management-day]');
-  await waitFor('Boolean(window.__integratedDayDebug.getState().management.weekComplete)', 'The first week did not settle');
+  assert(matchResult.score.home === 2 && matchResult.score.away === 1, 'The canonical episode path did not produce a 2:1 match');
+  await waitFor('!document.querySelector("[data-hearing]").hidden', 'The five-chair hearing did not open');
+  assert(await evaluate('window.__integratedDayDebug.getState().episode.xiaomanDecision === "stay-trial"'), 'Xiaoman did not make his own stay decision');
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 2,
+    mobile: true
+  });
+  await sleep(250);
+  assert(!await evaluate('document.documentElement.scrollWidth > innerWidth'), 'The hearing overflows on mobile');
+  await assertInsideViewport('[data-hearing]');
+  await capture('hearing-mobile');
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 1440,
+    height: 900,
+    deviceScaleFactor: 1,
+    mobile: false
+  });
+  await sleep(250);
+  await click('[data-story-action="hearing:five-party-week"]');
+  await waitFor('Boolean(window.__integratedDayDebug.getState().management.weekComplete)', 'The first story week did not settle');
   await assertInsideViewport('[data-week-summary]');
   assert((await text('[data-week-score]')).includes('2 : 1'), 'Weekly settlement has the wrong score');
+  assert((await text('[data-week-xiaoman]')).includes('再留一周'), 'Character consequence is missing from the weekly summary');
+  assert((await text('[data-week-next-crisis]')).includes('五方会议'), 'The next crisis is missing from the weekly summary');
   await capture('week');
 
   await navigate();
@@ -516,9 +557,10 @@ try {
   console.log('PASS training and relationship path');
   console.log('PASS save and reload restoration');
   console.log('PASS desktop and mobile layout');
-  console.log('PASS two-map first management week');
-  console.log('PASS cash recovery and weekly settlement');
-  console.log('PASS deterministic three-highlight match');
+  console.log('PASS two-map promise week');
+  console.log('PASS blank notice, Shen reversal, and five-chair hearing');
+  console.log('PASS three active promise activities');
+  console.log('PASS deterministic callback match and character settlement');
   assert(pageErrors.length === 0, `Browser errors: ${pageErrors.join(' | ')}`);
   console.log('PASS browser console');
 } catch (error) {
@@ -540,6 +582,7 @@ try {
       await sleep(150);
     }
   }
+  await new Promise(resolveClose => server.close(resolveClose));
 }
 
 process.exitCode = exitCode;
