@@ -99,6 +99,15 @@
         <span><small>委员会</small><strong data-metric="governance">1/5</strong></span>
       </div>
 
+      <aside class="weekly-care" data-weekly-care hidden aria-label="本周牵挂">
+        <button class="care-card" data-care-open type="button">
+          <span>本周牵挂</span>
+          <strong data-care-title>小满的七号背心</strong>
+          <small data-care-progress>周日前决定去留</small>
+        </button>
+        <button class="ledger-toggle" data-ledger-toggle type="button">查看账本</button>
+      </aside>
+
       <aside class="field-notes" data-notes hidden aria-label="今日记录">
         <div class="notes-heading">
           <div><span>安若童</span><strong>今天不用赶时间</strong></div>
@@ -183,6 +192,33 @@
         <div class="decision-options" data-decision-options></div>
       </section>
 
+      <section class="story-scene" data-story-scene hidden role="dialog" aria-modal="true" aria-label="本周故事">
+        <div class="story-portrait" data-story-portrait data-character="an" aria-hidden="true"></div>
+        <div class="story-copy">
+          <div class="story-heading">
+            <span data-story-kicker>春 15 日</span>
+            <button data-story-close type="button" aria-label="暂时收起故事">回到球场</button>
+          </div>
+          <strong class="story-speaker" data-story-speaker>安若童</strong>
+          <div class="story-beats" data-story-beats></div>
+          <div class="promise-picker" data-promise-picker hidden></div>
+          <div class="story-options" data-story-options></div>
+        </div>
+        <figure class="story-prop" data-story-prop data-prop="notice">
+          <div aria-hidden="true"></div>
+          <figcaption data-story-prop-caption>一张没有名字的通知</figcaption>
+        </figure>
+      </section>
+
+      <section class="episode-activity" data-episode-activity hidden role="dialog" aria-modal="true" aria-label="本周行动">
+        <div class="activity-heading">
+          <div><span data-activity-kicker>今天只做一件事</span><strong data-activity-title>陪小满加练</strong></div>
+          <button data-activity-close type="button" aria-label="暂时离开行动">先离开</button>
+        </div>
+        <div class="activity-progress" data-activity-progress>0 / 3</div>
+        <div class="activity-stage" data-activity-stage></div>
+      </section>
+
       <section class="match-panel" data-match-panel hidden role="dialog" aria-modal="true" aria-label="主场比赛">
         <div class="match-scoreline">
           <span>海风球场</span>
@@ -195,6 +231,17 @@
           <p data-match-copy></p>
         </div>
         <div class="match-options" data-match-options></div>
+      </section>
+
+      <section class="hearing-panel" data-hearing hidden role="dialog" aria-modal="true" aria-label="五把椅子的听证会">
+        <div class="hearing-memory" aria-hidden="true"></div>
+        <span>比赛结束以后</span>
+        <h2>五把椅子，谁有资格坐下？</h2>
+        <p data-hearing-copy>小满已经做出了自己的选择。现在要决定的是，以后谁能替球场作决定。</p>
+        <div class="hearing-chairs" aria-label="五个决定球场未来的席位">
+          <i>教练</i><i>队员</i><i>小店</i><i>社区</i><i>安若童</i>
+        </div>
+        <div class="hearing-options" data-hearing-options></div>
       </section>
 
       <button class="management-day-control" data-end-management-day hidden type="button">收好今天的决定</button>
@@ -251,6 +298,12 @@
         <span>春 15 日至春 21 日</span>
         <h1 data-week-summary-title>球场撑过了第一周</h1>
         <p data-week-summary-copy></p>
+        <div class="week-character" data-week-character>
+          <div><span>小满</span><strong data-week-xiaoman>还没有做出决定</strong></div>
+          <div><span>没来得及的事</span><strong data-week-missed>还没有留下遗憾</strong></div>
+          <div><span>沈峤</span><strong data-week-shen>仍在场外等待</strong></div>
+          <div><span>下周危机</span><strong data-week-next-crisis>球场的决定权仍未落定</strong></div>
+        </div>
         <div class="week-score" data-week-score></div>
         <div class="week-metrics" data-week-metrics></div>
         <strong class="week-next">沈峤没有离开。他把一份新的债权文件交给了罗馆长。</strong>
