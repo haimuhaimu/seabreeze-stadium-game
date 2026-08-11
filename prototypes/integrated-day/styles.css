@@ -151,11 +151,15 @@ kbd {
 .wind-layer i:nth-child(4) { left: 34%; top: 13%; animation-delay: -8s; animation-duration: 14s; }
 
 .morning-layer,
-.shop-actors {
+.shop-actors,
+.world-content-layer {
   position: absolute;
   inset: 0;
   z-index: 4;
 }
+
+.world-content-layer { pointer-events: none; }
+.world-content-layer .world-target { pointer-events: auto; }
 
 .world-target,
 .world-npc {
@@ -278,6 +282,61 @@ kbd {
 .npc-qiaoqiao { background-position: 60% 0; }
 .npc-wenshu { background-position: 80% 0; }
 .npc-assistant { background-position: 100% 0; }
+
+.npc-shen {
+  width: 48px;
+  height: 124px;
+  background: url("./assets/shen-qiao-handpainted-v1.png") center bottom / contain no-repeat;
+}
+
+.scheduled-npc { z-index: 6; }
+
+.exit-target,
+.mainline-target {
+  width: 94px;
+  height: 74px;
+  transform: translate(-50%, -74%);
+}
+
+.exit-target::after,
+.mainline-target::after { bottom: 0; }
+
+.exit-target .target-ring,
+.mainline-target .target-ring {
+  bottom: 0;
+  width: 66px;
+  height: 24px;
+}
+
+.exit-marker,
+.mainline-marker {
+  position: absolute;
+  left: 50%;
+  bottom: 17px;
+  z-index: 3;
+  min-width: 54px;
+  padding: 5px 8px 4px;
+  border: 1px solid rgb(225 242 244 / 42%);
+  border-radius: 8px;
+  background: rgb(16 47 57 / 88%);
+  color: #edf6f5;
+  box-shadow: 0 3px 0 rgb(4 20 25 / 32%);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+.mainline-marker {
+  border-color: #9d4b40;
+  background: #c96253;
+}
+
+.exit-target:hover .exit-marker,
+.exit-target.nearby .exit-marker,
+.mainline-target:hover .mainline-marker,
+.mainline-target.nearby .mainline-marker { transform: translateX(-50%) translateY(-3px); }
 
 .actor-shadow {
   position: absolute;
@@ -486,6 +545,14 @@ kbd {
 .objective-note > span,
 .objective-note > strong { display: block; }
 .objective-note > span { color: #ff9f8e; font-size: 10px; font-weight: 800; }
+.objective-note > span b { font: inherit; }
+.objective-note > span i {
+  display: inline-block;
+  width: 13px;
+  height: 1px;
+  margin: 0 6px 3px;
+  background: rgb(255 159 142 / 55%);
+}
 .objective-note > strong { margin-top: 3px; font-size: 13px; line-height: 1.4; }
 
 .notes-toggle {

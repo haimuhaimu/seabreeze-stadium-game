@@ -149,7 +149,7 @@ export function createGameState() {
       mapId: 'training',
       positions: {
         training: { x: 50, y: 89 },
-        stadium: { x: 12, y: 78 }
+        stadium: { x: 10, y: 90 }
       }
     }
   };
@@ -647,5 +647,17 @@ export function advanceCampaignDay(state) {
     text: `${day.weekday}，春${day.date}日。${day.title}。`,
     minute: next.minute
   }];
+  return next;
+}
+
+export function recordNpcConversation(state, npcId, copy) {
+  if (!isManagementWeekDay(state.dayIndex) || state.phase !== 'morning' || !npcId || !copy) return state;
+  const next = copyState(state);
+  const eventId = `talk-${npcId}-day-${next.dayIndex}`;
+  if (!next.events.includes(eventId)) {
+    next.minute += 8;
+    addEvent(next, eventId);
+  }
+  appendManagementJournal(next, 'relationship', copy);
   return next;
 }

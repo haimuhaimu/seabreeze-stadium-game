@@ -1,4 +1,5 @@
 import { getDayContent, getOrders, requiredInventoryForDay } from './daily-content.js';
+import { getCampaignDay, getRequiredAction, isPrologueDay, isManagementWeekDay } from './campaign-content.js';
 import {
   GATHERABLES,
   REPAIRS,
@@ -12,14 +13,19 @@ import {
   buyRepair,
   chooseSaveMoney,
   finishDay,
-  advanceDay
+  advanceDay,
+  recordNpcConversation
 } from './game-state.js';
 import { loadSave, writeSave, clearSave } from './save-game.js';
 import { TRAINING_TARGETS, createTrainingSession, takeShot } from './training-game.js';
+import { getMap, getMapObjects, canStandOnMap } from './world-content.js';
+import { getNpcSchedule } from './npc-schedules.js';
 
 const root = document.querySelector('.game');
 const viewport = document.querySelector('[data-scene]');
 const plane = document.querySelector('[data-world-plane]');
+const worldMap = document.querySelector('[data-world-map]');
+const worldContent = document.querySelector('[data-world-content]');
 const player = document.querySelector('[data-player]');
 const prompt = document.querySelector('[data-prompt]');
 const toastHost = document.querySelector('[data-toast-host]');
@@ -38,11 +44,9 @@ const resourceIcon = document.querySelector('.money-slot .item-sprite');
 const touchControls = document.querySelector('.touch-controls');
 const touchAction = document.querySelector('[data-action]');
 
-const MAP_SIZE = { width: 1672, height: 941 };
 const WALK_SPEED = 230;
 const ARRIVAL_DISTANCE = 8;
 const INTERACTION_DISTANCE = 112;
-const START_POSITION = Object.freeze({ x: 50, y: 89 });
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
 const customerClasses = {
@@ -54,26 +58,11 @@ const customerClasses = {
   郭教练: 'npc-guo'
 };
 
-const worldObjects = {
-  'tea-a': { x: 28, y: 85, approach: { x: 31, y: 82 }, kind: 'gather', label: '收起入口花槽里的茶草' },
-  'tea-b': { x: 62, y: 78, approach: { x: 60, y: 82 }, kind: 'gather', label: '收起围网边的茶草' },
-  'fruit-a': { x: 82, y: 32, approach: { x: 84, y: 42 }, kind: 'gather', label: '收起小店旁的果子' },
-  'fruit-b': { x: 16, y: 85, approach: { x: 20, y: 83 }, kind: 'gather', label: '捡起自行车架旁的果子' },
-  coach: { x: 55, y: 55, approach: { x: 55, y: 64 }, kind: 'coach', label: '和郭教练说话' },
-  shop: { x: 73, y: 31, approach: { x: 73, y: 42 }, kind: 'shop', label: '打开场边小店' }
-};
-
-const blockedAreas = [
-  { x1: 0, y1: 0, x2: 100, y2: 23.5 },
-  { x1: 29, y1: 18, x2: 59, y2: 40 },
-  { x1: 59, y1: 19, x2: 84, y2: 40 },
-  { x1: 0, y1: 35, x2: 23.5, y2: 76 },
-  { x1: 87, y1: 42, x2: 100, y2: 79 }
-];
-
 const loaded = loadSave(localStorage);
 let state = loaded.ok ? loaded.record.state : createGameState();
-let position = loaded.ok ? loaded.record.position : { ...START_POSITION };
+let activeMapId = loaded.ok ? (loaded.record.mapId ?? state.world.mapId) : 'training';
+let position = loaded.ok ? loaded.record.position : { ...getMap(activeMapId).start };
+let worldObjects = {};
 let hasStarted = loaded.reason === 'absent';
 let destination = null;
 let pendingInteraction = null;
@@ -92,11 +81,64 @@ let chapterResetArmed = false;
 const pressedKeys = new Set();
 
 function currentDay() {
-  return getDayContent(state.dayIndex);
+  return isPrologueDay(state.dayIndex) ? getDayContent(state.dayIndex) : getCampaignDay(state.dayIndex);
 }
 
 function currentOrders() {
-  return getOrders(state.dayIndex);
+  return isPrologueDay(state.dayIndex) ? getOrders(state.dayIndex) : [];
+}
+
+const MAINLINE_OBJECTS = Object.freeze({
+  'review-ledger': 'stadium-office',
+  'choose-training': 'coach',
+  'choose-opponent': 'stadium-office',
+  'choose-market': 'shop',
+  'prepare-facility': 'pitch-prep',
+  'welcome-opponent': 'guest-gate',
+  'play-match': 'match-center'
+});
+
+function rebuildWorldObjects() {
+  const map = getMap(activeMapId);
+  const objects = {};
+  const requiredAction = getRequiredAction(state.dayIndex);
+  const requiredObjectId = MAINLINE_OBJECTS[requiredAction];
+
+  for (const object of getMapObjects(activeMapId)) {
+    if (isPrologueDay(state.dayIndex)) {
+      objects[object.id] = { ...object };
+    } else if (object.id === requiredObjectId) {
+      objects[object.id] = {
+        ...object,
+        kind: 'mainline',
+        actionId: requiredAction,
+        label: state.management.completedActions.includes(requiredAction)
+          ? '今天的决定已经完成'
+          : object.label
+      };
+    }
+  }
+
+  for (const exit of map.exits) {
+    objects[exit.id] = { ...exit, kind: 'exit' };
+  }
+
+  const schedules = isManagementWeekDay(state.dayIndex)
+    ? getNpcSchedule(state.dayIndex, state.phase, { opponentId: state.management.opponentId })
+    : [];
+  for (const npc of schedules.filter(item => item.mapId === activeMapId)) {
+    objects[`npc-${npc.id}`] = {
+      id: `npc-${npc.id}`,
+      x: npc.x,
+      y: npc.y,
+      approach: { x: npc.x, y: Math.min(94, npc.y + 8) },
+      kind: 'npc',
+      label: `和${npc.name}说话`,
+      npc
+    };
+  }
+
+  worldObjects = objects;
 }
 
 function formatTime(minutes) {
@@ -107,7 +149,9 @@ function formatTime(minutes) {
 
 function persist() {
   if (!hasStarted) return;
-  writeSave(localStorage, state, position);
+  state.world.mapId = activeMapId;
+  state.world.positions[activeMapId] = { ...position };
+  writeSave(localStorage, state, position, activeMapId);
   lastPositionSave = performance.now();
 }
 
@@ -133,14 +177,18 @@ function pixelDistance(a, b) {
 }
 
 function canStand(x, y) {
-  if (x < 1.5 || x > 98 || y < 24 || y > 96) return false;
-  return !blockedAreas.some(area => x > area.x1 && x < area.x2 && y > area.y1 && y < area.y2);
+  return canStandOnMap(activeMapId, x, y);
 }
 
 function availableObject(id) {
   if (!hasStarted || trainingActive || state.phase !== 'morning') return false;
   if (GATHERABLES[id] && state.collectedToday.includes(id)) return false;
-  return Boolean(worldObjects[id]);
+  const object = worldObjects[id];
+  if (!object) return false;
+  if (isManagementWeekDay(state.dayIndex) && object.kind === 'mainline') {
+    return !state.management.completedActions.includes(object.actionId);
+  }
+  return true;
 }
 
 function nearestObject() {
@@ -293,21 +341,78 @@ function updateProximity(force = false) {
   prompt.hidden = !hasStarted || state.phase === 'complete';
 }
 
+function makeWorldButton(id, object) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'world-target';
+  button.dataset.object = id;
+  button.style.setProperty('--x', `${object.x}%`);
+  button.style.setProperty('--y', `${object.y}%`);
+  button.setAttribute('aria-label', object.label);
+
+  if (object.kind === 'npc') {
+    button.classList.add('npc-target', 'scheduled-npc');
+    const shadow = document.createElement('span');
+    shadow.className = 'actor-shadow';
+    const sprite = document.createElement('span');
+    sprite.className = `npc-sprite ${object.npc.spriteClass}`;
+    const name = document.createElement('span');
+    name.className = 'world-name';
+    name.textContent = object.npc.name;
+    button.append(shadow, sprite, name);
+  } else {
+    button.classList.add(object.kind === 'exit' ? 'exit-target' : 'mainline-target');
+    const ring = document.createElement('span');
+    ring.className = 'target-ring';
+    const marker = document.createElement('span');
+    marker.className = object.kind === 'exit' ? 'exit-marker' : 'mainline-marker';
+    marker.textContent = object.kind === 'exit' ? '海风路' : '处理';
+    button.append(ring, marker);
+  }
+  return button;
+}
+
+function renderDynamicWorldContent() {
+  const fragment = document.createDocumentFragment();
+  for (const [id, object] of Object.entries(worldObjects)) {
+    if (['tea-a', 'tea-b', 'fruit-a', 'fruit-b', 'coach', 'shop'].includes(id)) continue;
+    if (!availableObject(id)) continue;
+    fragment.append(makeWorldButton(id, object));
+  }
+  worldContent.replaceChildren(fragment);
+}
+
 function renderWorldTargets() {
-  morningLayer.hidden = state.phase !== 'morning';
-  for (const id of Object.keys(GATHERABLES)) {
-    document.querySelector(`[data-object="${id}"]`).hidden = state.collectedToday.includes(id);
+  rebuildWorldObjects();
+  const map = getMap(activeMapId);
+  root.dataset.map = activeMapId;
+  worldMap.src = map.image;
+  worldMap.alt = map.alt;
+  document.querySelector('[data-map-label]').textContent = map.label;
+
+  morningLayer.hidden = state.phase !== 'morning' || activeMapId !== 'training';
+  morningLayer.querySelectorAll('[data-object]').forEach(element => {
+    element.hidden = !availableObject(element.dataset.object);
+  });
+
+  const coach = document.querySelector('[data-object="coach"]');
+  if (worldObjects.coach) {
+    const trainingReady = isPrologueDay(state.dayIndex)
+      && currentDay().trainingAvailable
+      && !state.training.completedToday;
+    coach.classList.toggle('met', state.relationship.coachMet);
+    coach.setAttribute('aria-label', trainingReady ? '和郭教练踢三脚' : worldObjects.coach.label);
+    if (trainingReady) worldObjects.coach.label = '和郭教练踢三脚';
   }
 
-  const trainingReady = currentDay().trainingAvailable && !state.training.completedToday;
-  const coach = document.querySelector('[data-object="coach"]');
-  coach.classList.toggle('met', state.relationship.coachMet);
-  coach.setAttribute('aria-label', trainingReady ? '和郭教练踢三脚' : '和郭教练说话');
-  worldObjects.coach.label = trainingReady ? '和郭教练踢三脚' : '和郭教练说话';
-
   const door = document.querySelector('[data-open-shop]');
-  door.classList.toggle('ready', isShopReady());
-  document.querySelector('[data-door-label]').textContent = isShopReady() ? '可以开店' : '场边小店';
+  const shopReady = isPrologueDay(state.dayIndex) && isShopReady();
+  door.classList.toggle('ready', shopReady);
+  document.querySelector('[data-door-label]').textContent = isManagementWeekDay(state.dayIndex)
+    ? '安排周末集市'
+    : shopReady ? '可以开店' : '场边小店';
+
+  renderDynamicWorldContent();
   updateProximity(true);
 }
 
@@ -493,6 +598,22 @@ function resolveTrainingShot(pointer = trainingPointer) {
   return true;
 }
 
+function changeMap(exit) {
+  state.world.positions[activeMapId] = { ...position };
+  activeMapId = exit.targetMap;
+  state.world.mapId = activeMapId;
+  position = { ...exit.targetPosition };
+  state.world.positions[activeMapId] = { ...position };
+  destination = null;
+  pendingInteraction = null;
+  speech.hidden = true;
+  render();
+  fitWorld();
+  persist();
+  showToast(activeMapId === 'stadium' ? '沿海滨路到了海风主赛场。' : '沿海滨路回到旧训练场。');
+  return true;
+}
+
 function interact(id) {
   if (!availableObject(id)) return false;
   const object = worldObjects[id];
@@ -532,6 +653,18 @@ function interact(id) {
       persist();
       showSpeech(currentOrders()[0].customer, '今天这里真的开门？那我先来。', { x: 70, y: 35 }, 2800);
     }
+  }
+  if (object.kind === 'exit') {
+    successful = changeMap(object);
+  }
+  if (object.kind === 'npc') {
+    successful = applyTransition(
+      current => recordNpcConversation(current, object.npc.id, object.npc.copy)
+    );
+    showSpeech(object.npc.name, object.npc.copy, { x: object.x, y: Math.max(20, object.y - 12) }, 5200);
+  }
+  if (object.kind === 'mainline') {
+    showToast('今天的决定已经摆在这里，打开安排面板就能处理。');
   }
   return successful;
 }
@@ -638,9 +771,10 @@ function clamp(value, min, max) {
 function fitWorld() {
   const viewportWidth = viewport.clientWidth;
   const viewportHeight = viewport.clientHeight;
-  const scale = Math.max(viewportWidth / MAP_SIZE.width, viewportHeight / MAP_SIZE.height);
-  plane.style.width = `${Math.ceil(MAP_SIZE.width * scale)}px`;
-  plane.style.height = `${Math.ceil(MAP_SIZE.height * scale)}px`;
+  const map = getMap(activeMapId);
+  const scale = Math.max(viewportWidth / map.width, viewportHeight / map.height);
+  plane.style.width = `${Math.ceil(map.width * scale)}px`;
+  plane.style.height = `${Math.ceil(map.height * scale)}px`;
   updatePlayerVisual();
   updateCamera();
 }
@@ -682,7 +816,10 @@ function goToNextDay() {
   const successful = state.dayIndex !== previousDay || state.chapterComplete !== previousChapter;
   showToast(state.journal.at(-1)?.text);
   if (state.dayIndex !== previousDay) {
-    position = { ...START_POSITION };
+    activeMapId = 'training';
+    state.world.mapId = activeMapId;
+    position = { ...getMap(activeMapId).start };
+    state.world.positions[activeMapId] = { ...position };
     destination = null;
     pendingInteraction = null;
     speech.hidden = true;
@@ -697,7 +834,8 @@ function goToNextDay() {
 function resetGame() {
   clearSave(localStorage);
   state = createGameState();
-  position = { ...START_POSITION };
+  activeMapId = 'training';
+  position = { ...getMap(activeMapId).start };
   destination = null;
   pendingInteraction = null;
   trainingActive = false;
@@ -716,15 +854,14 @@ function resetGame() {
   fitWorld();
 }
 
-document.querySelectorAll('[data-object]').forEach(button => {
-  button.addEventListener('click', event => {
-    event.stopPropagation();
-    walkToObject(button.dataset.object);
-  });
-});
-
 plane.addEventListener('click', event => {
-  if (!hasStarted || trainingActive || state.phase !== 'morning' || event.target.closest('[data-object]')) return;
+  if (!hasStarted || trainingActive || state.phase !== 'morning') return;
+  const objectTarget = event.target.closest('[data-object]');
+  if (objectTarget) {
+    event.stopPropagation();
+    walkToObject(objectTarget.dataset.object);
+    return;
+  }
   const rect = plane.getBoundingClientRect();
   const point = {
     x: (event.clientX - rect.left) / rect.width * 100,

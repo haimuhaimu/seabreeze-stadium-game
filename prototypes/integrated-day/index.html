@@ -12,7 +12,7 @@
   <main class="game" data-phase="morning">
     <section class="viewport" data-scene tabindex="0" aria-label="海风球场，可用方向键或 W A S D 移动">
       <div class="world-plane" data-world-plane>
-        <img class="world-map" src="./assets/seaside-club-handpainted-v4.png" alt="手绘儿童动画风格的海边社区足球场、俱乐部、看台与场边小店">
+        <img class="world-map" data-world-map src="./assets/seaside-club-handpainted-v4.png" alt="手绘儿童动画风格的海边社区足球场、俱乐部、看台与场边小店">
         <div class="light-layer" aria-hidden="true"></div>
         <div class="water-glint" aria-hidden="true"></div>
         <div class="wind-layer" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
@@ -53,6 +53,8 @@
           </button>
         </div>
 
+        <div class="world-content-layer" data-world-content aria-label="当前场地人物与出口"></div>
+
         <div class="shop-actors" data-shop-actors hidden aria-hidden="true">
           <div class="world-npc current-customer" style="--x:73%;--y:42%">
             <span class="actor-shadow"></span><span class="npc-sprite" data-customer-sprite></span>
@@ -83,7 +85,7 @@
           <small data-weather>海风转晴</small>
         </div>
         <div class="objective-note">
-          <span data-phase-title>自由的上午</span>
+          <span><b data-map-label>旧训练场与场边小店</b><i aria-hidden="true"></i><b data-phase-title>自由的上午</b></span>
           <strong data-current-goal>沿海边球场走走，准备下午开店的东西。</strong>
           <button class="notes-toggle" data-notes-toggle type="button">今日记录 <kbd>J</kbd></button>
         </div>
