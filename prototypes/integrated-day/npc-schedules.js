@@ -1,47 +1,74 @@
 import { getOpponent } from './opponent-content.js';
 
+function npc(id, name, spriteClass, mapId, x, y, copy, options = {}) {
+  return Object.freeze({ id, name, spriteClass, mapId, x, y, copy, optional: true, ...options });
+}
+
 const firstWeek = Object.freeze({
   3: Object.freeze([
-    Object.freeze({ id: 'shen-qiao', name: '沈峤', spriteClass: 'npc-shen', mapId: 'stadium', x: 72, y: 67, optional: false, copy: '债务不是天气。你可以接受澜岸体育的合作，也可以看着它继续变大。' }),
-    Object.freeze({ id: 'lin-chuan', name: '林川', spriteClass: 'npc-linchuan', mapId: 'stadium', x: 41, y: 66, optional: true, copy: '签字当然算数。可要留下来踢球的人，不只看一张纸。' }),
-    Object.freeze({ id: 'aunt-xu', name: '许姨', spriteClass: 'npc-sumi', mapId: 'training', x: 75, y: 43, optional: true, copy: '先把账看完。二十年前，大家也是从一句先撑过去开始的。' })
+    npc('coach-guo', '郭教练', 'npc-guo', 'stadium', 58, 67, '通知我已经起草了。名字空着，不代表我们可以一直不回答。', { optional: false }),
+    npc('lin-chuan', '林川', 'npc-linchuan', 'stadium', 43, 66, '第一周就决定谁离开，你凭什么？'),
+    npc('shen-qiao', '沈峤', 'npc-shen', 'stadium', 74, 66, '我可以接下债务。决定权也应该写清楚。')
   ]),
   4: Object.freeze([
-    Object.freeze({ id: 'xiaoman', name: '小满', spriteClass: 'npc-assistant', mapId: 'training', x: 61, y: 63, optional: false, copy: '我知道自己可能上不了。但训练名单，能不能让我自己看到？' }),
-    Object.freeze({ id: 'lin-chuan', name: '林川', spriteClass: 'npc-linchuan', mapId: 'training', x: 49, y: 62, optional: true, copy: '练什么都可以。只是别让决定最后只落在最年轻的人身上。' })
+    npc('xiaoman', '小满', 'npc-assistant', 'training', 61, 63, '我在门外都听见了。能不能陪我再练一次？', { optional: false }),
+    npc('aunt-xu', '许姨', 'npc-sumi', 'training', 75, 43, '小店还能开一天。钱不一定够，但大家会知道。'),
+    npc('lin-chuan', '林川', 'npc-linchuan', 'training', 49, 62, '办公室有二十年前的旧记录，我去找钥匙。')
   ]),
   5: Object.freeze([
-    Object.freeze({ id: 'lin-chuan', name: '林川', spriteClass: 'npc-linchuan', mapId: 'stadium', x: 65, y: 67, optional: false, copy: '强队会把人带来，也会把我们的问题放大。你要先想清楚想让谁看见什么。' }),
-    Object.freeze({ id: 'aunt-xu', name: '许姨', spriteClass: 'npc-sumi', mapId: 'training', x: 76, y: 44, optional: true, copy: '港口那边的人会自己带水。高校队会带来很多镜头。两种热闹不一样。' })
+    npc('xiaoman', '小满', 'npc-assistant', 'training', 59, 63, '球已经放在边线了。你答应过的话，我还记得。', { promiseId: 'train' }),
+    npc('aunt-xu', '许姨', 'npc-sumi', 'training', 75, 43, '小店的杯子洗好了。今天不开，明天也许就来不及。', { promiseId: 'fundraise' }),
+    npc('lin-chuan', '林川', 'npc-linchuan', 'stadium', 67, 67, '办公室的旧柜子开了。那张通知应该还在里面。', { promiseId: 'records' })
   ]),
   6: Object.freeze([
-    Object.freeze({ id: 'aunt-xu', name: '许姨', spriteClass: 'npc-sumi', mapId: 'training', x: 74, y: 42, optional: false, copy: '摊位不是添头。有人愿意在比赛前来摆摊，说明他相信这里还有下周。' }),
-    Object.freeze({ id: 'xiaoman', name: '小满', spriteClass: 'npc-assistant', mapId: 'training', x: 58, y: 64, optional: true, copy: '如果做体验课，我可以带小孩子练停球。这个我还挺会。' })
+    npc('xiaoman', '小满', 'npc-assistant', 'training', 59, 63, '今天结束以后，剩下的事就真的没有时间了。', { promiseId: 'train' }),
+    npc('aunt-xu', '许姨', 'npc-sumi', 'training', 75, 43, '我可以自己开店，但你来和不来，大家看得出来。', { promiseId: 'fundraise' }),
+    npc('lin-chuan', '林川', 'npc-linchuan', 'stadium', 67, 67, '我先把照片找到了，还差签字和日期。', { promiseId: 'records' })
   ]),
   7: Object.freeze([
-    Object.freeze({ id: 'coach-guo', name: '郭教练', spriteClass: 'npc-guo', mapId: 'stadium', x: 47, y: 68, optional: false, copy: '灯、看台、草皮都需要钱。比赛只会告诉你，哪一处没准备好。' }),
-    Object.freeze({ id: 'lin-chuan', name: '林川', spriteClass: 'npc-linchuan', mapId: 'stadium', x: 56, y: 67, optional: true, copy: '草皮修好，最先知道的不是观众，是每个落地的膝盖。' })
+    npc('coach-guo', '郭教练', 'npc-guo', 'stadium', 48, 68, '在钱确定以前，我先暂停小满下一周的安排。', { optional: false }),
+    npc('aunt-xu', '许姨', 'npc-sumi', 'stadium', 57, 68, '电工刚来电话。灯和一个人的工作，只够先付一份。')
   ]),
   8: Object.freeze([
-    Object.freeze({ id: 'guest-captain', name: '客队队长', spriteClass: 'npc-qiaoqiao', mapId: 'stadium', x: 9, y: 41, optional: false, dynamicOpponent: true, copy: '一路都能看见海。你们这地方，比照片里大多了。' }),
-    Object.freeze({ id: 'shen-qiao', name: '沈峤', spriteClass: 'npc-shen', mapId: 'stadium', x: 76, y: 65, optional: true, copy: '一场比赛能把问题盖住半天。经营权评审不会只看半天。' })
+    npc('guest-captain', '客队队长', 'npc-qiaoqiao', 'stadium', 9, 41, '我们按之前的邀请来了。今晚的海风比学校操场大。', { dynamicOpponent: true }),
+    npc('shen-qiao', '沈峤', 'npc-shen', 'stadium', 76, 65, '我给他的工作是真的。', { optional: false }),
+    npc('xiaoman', '小满', 'npc-assistant', 'stadium', 59, 65, '这次让我自己回答。')
   ]),
   9: Object.freeze([
-    Object.freeze({ id: 'lin-chuan', name: '林川', spriteClass: 'npc-linchuan', mapId: 'stadium', x: 43, y: 64, optional: true, copy: '今天听你的。终场以后，名单和账本还是要一起谈。' }),
-    Object.freeze({ id: 'xiaoman', name: '小满', spriteClass: 'npc-assistant', mapId: 'stadium', x: 56, y: 64, optional: true, copy: '我紧张。但不是因为会输，是因为这次看台上真的有人。' }),
-    Object.freeze({ id: 'coach-guo', name: '郭教练', spriteClass: 'npc-guo', mapId: 'stadium', x: 49, y: 65, optional: false, copy: '哨响以后先看场上。其他决定，等终场再承担。' })
+    npc('coach-guo', '郭教练', 'npc-guo', 'stadium', 49, 65, '先把比赛踢完。终场后所有人留下。', { optional: false }),
+    npc('lin-chuan', '林川', 'npc-linchuan', 'stadium', 43, 64, '我会站在他旁边，但决定要由你说出口。'),
+    npc('xiaoman', '小满', 'npc-assistant', 'stadium', 56, 64, '比赛以后，我先说我自己的选择。'),
+    npc('aunt-xu', '许姨', 'npc-sumi', 'stadium', 62, 66, '五把椅子已经搬到场边了。'),
+    npc('director-luo', '罗馆长', 'npc-wenshu', 'stadium', 69, 66, '今天不是只记比分。谁签字，也要留下记录。')
   ])
 });
 
+function promiseAwareCopy(npc, episode) {
+  if (!npc.promiseId || !episode) return npc.copy;
+  if (episode.promisesCompleted?.includes(npc.promiseId)) {
+    return npc.promiseId === 'train'
+      ? '三次传球已经做完。周日我会记得。'
+      : npc.promiseId === 'fundraise'
+        ? '小店的钱已经收进铁盒。大家也记住了你怎么说。'
+        : '旧照片已经对上名字。这件事不能再装作没有发生。';
+  }
+  if (!episode.promisesChosen?.includes(npc.promiseId)) {
+    return `${npc.copy}我知道这件事没有排进你答应的两件里。`;
+  }
+  return npc.copy;
+}
+
 export function getNpcSchedule(dayIndex, phase = 'morning', context = {}) {
   if (phase !== 'morning') return [];
-  return (firstWeek[dayIndex] ?? []).map(npc => {
-    if (!npc.dynamicOpponent || !context.opponentId) return { ...npc };
+  return (firstWeek[dayIndex] ?? []).map(item => {
+    const copy = promiseAwareCopy(item, context.episode);
+    if (!item.dynamicOpponent || !context.opponentId) return { ...item, copy };
     const opponent = getOpponent(context.opponentId);
     return {
-      ...npc,
+      ...item,
       name: opponent.captain,
       copy: `我是${opponent.name}的${opponent.captain}。一路都能看见海，你们这地方比照片里大多了。`
     };
   });
 }
+

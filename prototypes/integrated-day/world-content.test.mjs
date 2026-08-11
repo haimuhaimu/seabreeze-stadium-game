@@ -35,5 +35,22 @@ test('Lin Xu and Xiaoman all appear during the first week', () => {
 test('Shen Qiao enters at the main stadium on spring 15', () => {
   const shen = getNpcSchedule(3, 'morning').find(npc => npc.id === 'shen-qiao');
   assert.equal(shen.mapId, 'stadium');
-  assert.match(shen.copy, /债务|合作/);
+  assert.match(shen.copy, /债务|决定权/);
+});
+
+test('Xiaoman is outside the meeting on spring 16', () => {
+  const xiaoman = getNpcSchedule(4, 'morning').find(npc => npc.id === 'xiaoman');
+  assert.equal(xiaoman.mapId, 'training');
+  assert.match(xiaoman.copy, /门外|听见/);
+});
+
+test('spring 17 can expose all three promise locations on existing maps', () => {
+  assert.equal(MAPS.training.objects.some(item => item.id === 'shop'), true);
+  assert.equal(MAPS.training.objects.some(item => item.id === 'coach'), true);
+  assert.equal(MAPS.stadium.objects.some(item => item.id === 'stadium-office'), true);
+});
+
+test('each core character takes initiative in the episode', () => {
+  const ids = new Set([3, 4, 5, 6, 7, 8, 9].flatMap(day => getNpcSchedule(day).map(npc => npc.id)));
+  for (const id of ['coach-guo', 'lin-chuan', 'aunt-xu', 'xiaoman', 'shen-qiao']) assert.ok(ids.has(id));
 });
