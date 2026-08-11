@@ -15,9 +15,14 @@ import {
   finishDay,
   advanceDay,
   beginManagementWeek,
-  completeRequiredAction,
+  acknowledgeEpisodeNotice,
+  chooseEpisodePromises,
+  completeEpisodePromise,
+  resolveEpisodeFunding,
+  acknowledgeEpisodeOffer,
   startWeeklyMatch,
   chooseMatchHighlight,
+  completeEpisodeHearing,
   finishManagementDay,
   advanceCampaignDay
 } from './game-state.js';
@@ -150,52 +155,88 @@ test('a repaired facility cannot be purchased again on a later day', () => {
   assert.deepEqual(state.repairs, ['awning']);
 });
 
-test('the management week advances only after each required action', () => {
-  const prologue = {
+function completedPrologue() {
+  return {
     ...createGameState(),
     dayIndex: 2,
     phase: 'complete',
     chapterComplete: true,
     money: 100
   };
-  let state = beginManagementWeek(prologue);
+}
+
+function finishAndAdvance(state) {
+  const finished = finishManagementDay(state);
+  assert.equal(finished.phase, 'complete');
+  return advanceCampaignDay(finished);
+}
+
+function reachFriday(promiseIds = ['train', 'records'], fundraisingMode = 'private') {
+  let state = beginManagementWeek(completedPrologue());
+  state = acknowledgeEpisodeNotice(state);
+  state = finishAndAdvance(state);
+  state = chooseEpisodePromises(state, promiseIds);
+  state = finishAndAdvance(state);
+  state = completeEpisodePromise(state, promiseIds[0], promiseIds[0] === 'fundraise' ? { fundraisingMode } : {});
+  state = finishAndAdvance(state);
+  state = completeEpisodePromise(state, promiseIds[1], promiseIds[1] === 'fundraise' ? { fundraisingMode } : {});
+  return finishAndAdvance(state);
+}
+
+function reachSundayReadyState(promiseIds = ['train', 'records'], funding = 'protect-work') {
+  let state = reachFriday(promiseIds);
+  state = resolveEpisodeFunding(state, funding);
+  state = finishAndAdvance(state);
+  state = acknowledgeEpisodeOffer(state);
+  return finishAndAdvance(state);
+}
+
+test('the management week advances only after the required story action', () => {
+  let state = beginManagementWeek(completedPrologue());
   assert.equal(state.dayIndex, 3);
   const blocked = finishManagementDay(state);
   assert.equal(blocked.phase, 'morning');
-  state = completeRequiredAction(state, 'review-ledger', 'acknowledge');
+  state = acknowledgeEpisodeNotice(state);
   state = finishManagementDay(state);
   state = advanceCampaignDay(state);
   assert.equal(state.dayIndex, 4);
 });
 
-test('seven management actions produce a weekly settlement', () => {
-  const prologue = {
-    ...createGameState(),
-    dayIndex: 2,
-    phase: 'complete',
-    chapterComplete: true,
-    money: 100
-  };
-  let state = beginManagementWeek(prologue);
-  const choices = [
-    ['review-ledger', 'acknowledge'],
-    ['choose-training', 'shape'],
-    ['choose-opponent', 'harbor-workers'],
-    ['choose-market', 'youth-clinic'],
-    ['prepare-facility', 'grass'],
-    ['welcome-opponent', 'community-welcome']
-  ];
-  for (const [action, choice] of choices) {
-    state = completeRequiredAction(state, action, choice);
-    state = finishManagementDay(state);
-    state = advanceCampaignDay(state);
-  }
+test('the first week starts with a fixed opponent and blank notice', () => {
+  const state = beginManagementWeek(completedPrologue());
+  assert.equal(state.version, 3);
+  assert.equal(state.management.opponentId, 'city-university');
+  assert.equal(state.episode.sceneId, 'blank-notice');
+});
+
+test('two promise days can be completed in either order', () => {
+  const state = reachFriday(['records', 'train']);
+  assert.deepEqual(state.episode.promisesCompleted, ['records', 'train']);
+  assert.equal(state.episode.truthKnown, true);
+  assert.equal(state.episode.xiaomanTrust, 2);
+});
+
+test('friday locks the missed request and maps funding into long-term state', () => {
+  let state = reachFriday(['train', 'fundraise'], 'public');
+  const communityBefore = state.communitySupport;
+  state = resolveEpisodeFunding(state, 'pay-both');
+  assert.equal(state.episode.missedRequest, 'records');
+  assert.equal(state.management.shortfallPending, false);
+  assert.ok(state.communitySupport >= communityBefore);
+  assert.equal(state.facilities.prepared, 'floodlights');
+});
+
+test('sunday requires the hearing after three highlights', () => {
+  let state = reachSundayReadyState();
   state = startWeeklyMatch(state);
-  state = chooseMatchHighlight(state, 'patient-build');
-  state = chooseMatchHighlight(state, 'protect-youngster');
-  state = chooseMatchHighlight(state, 'press-late');
-  state = finishManagementDay(state);
+  state = chooseMatchHighlight(state, 'repeat-practice');
+  state = chooseMatchHighlight(state, 'ask-xiaoman');
+  state = chooseMatchHighlight(state, 'share-responsibility');
+  assert.equal(state.management.weekComplete, false);
+  assert.ok(state.episode.xiaomanDecision);
+  state = completeEpisodeHearing(state, 'five-party-week');
   assert.equal(state.management.weekComplete, true);
   assert.ok(state.management.settlement);
+  assert.equal(state.management.settlement.character.xiaomanDecision, state.episode.xiaomanDecision);
   assert.deepEqual(state.management.matchResult.score, { home: 2, away: 1 });
 });

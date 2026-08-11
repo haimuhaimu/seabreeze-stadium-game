@@ -13,8 +13,8 @@ export const OPPONENTS = Object.freeze({
   }),
   'city-university': Object.freeze({
     id: 'city-university',
-    name: '城市高校联队',
-    shortName: '高校联队',
+    name: '海岬大学联队',
+    shortName: '海岬大学',
     cost: 55,
     expectedAudience: 110,
     difficulty: 62,

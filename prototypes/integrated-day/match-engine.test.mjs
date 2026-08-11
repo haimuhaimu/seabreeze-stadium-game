@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRoster, chooseTrainingFocus } from './roster-state.js';
-import { createMatch, resolveHighlight, finishMatch } from './match-engine.js';
+import { createMatch, getAvailableHighlights, resolveHighlight, finishMatch } from './match-engine.js';
 
 test('training focus changes roster without mutating its input', () => {
   const roster = createRoster();
@@ -12,14 +12,23 @@ test('training focus changes roster without mutating its input', () => {
 });
 
 test('three highlight choices produce a deterministic match result', () => {
-  let match = createMatch({ opponentDifficulty: 48, attack: 48, defense: 53, cohesion: 48, facilityBonus: 4 });
-  match = resolveHighlight(match, 'patient-build');
-  match = resolveHighlight(match, 'protect-youngster');
-  match = resolveHighlight(match, 'press-late');
+  const episode = { promisesCompleted: ['train'] };
+  let match = createMatch({ opponentDifficulty: 62, attack: 48, defense: 48, cohesion: 46, facilityBonus: 0 });
+  match = resolveHighlight(match, 'repeat-practice', episode);
+  match = resolveHighlight(match, 'ask-xiaoman', episode);
+  match = resolveHighlight(match, 'share-responsibility', episode);
   const result = finishMatch(match);
   assert.equal(match.highlightIndex, 3);
   assert.deepEqual(result.score, { home: 2, away: 1 });
   assert.equal(result.complete, true);
+});
+
+test('the practice callback appears only after training with Xiaoman', () => {
+  const match = createMatch({ opponentDifficulty: 62, attack: 48, defense: 48, cohesion: 46, facilityBonus: 0 });
+  const withoutTraining = getAvailableHighlights(match, { promisesCompleted: ['records'] });
+  const withTraining = getAvailableHighlights(match, { promisesCompleted: ['train'] });
+  assert.equal(withoutTraining.choices.some(choice => choice.id === 'repeat-practice'), false);
+  assert.equal(withTraining.choices.some(choice => choice.id === 'repeat-practice'), true);
 });
 
 test('an unfinished match cannot be settled', () => {

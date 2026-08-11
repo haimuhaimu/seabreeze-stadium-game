@@ -5,8 +5,20 @@ import { createFacilities, FACILITY_PLANS, prepareFacility } from './facility-st
 import { createGovernance, applyGovernanceEffect } from './governance-state.js';
 import { getOpponent } from './opponent-content.js';
 import { createRoster, chooseTrainingFocus } from './roster-state.js';
-import { createMatch, resolveHighlight, finishMatch } from './match-engine.js';
-import { createEpisodeState } from './episode-state.js';
+import { HIGHLIGHTS, createMatch, resolveHighlight, finishMatch } from './match-engine.js';
+import {
+  createEpisodeState,
+  acknowledgeNotice,
+  choosePromises,
+  completePromise,
+  lockMissedRequest,
+  resolveFridayFunding,
+  recordEpisodeMatchChoice,
+  resolveXiaomanDecision,
+  acknowledgeShenOffer,
+  chooseHearing,
+  buildEpisodeConsequence
+} from './episode-state.js';
 
 export const GATHERABLES = Object.freeze({
   'tea-a': { inventoryKey: 'tea', label: '茶叶', journal: '花槽里的海岸茶草被风吹得很干净。' },
@@ -448,13 +460,125 @@ export function beginManagementWeek(state) {
   next.economy = postLedgerEntry(next.economy, { id: 'weekly-wages', label: '本周工资', amount: -70 });
   next.economy = postLedgerEntry(next.economy, { id: 'basic-maintenance', label: '基础维护', amount: -30 });
   next.management = createManagementProgress();
+  next.management.opponentId = 'city-university';
+  next.episode = createEpisodeState();
   next.world.mapId = 'stadium';
   syncManagementCash(next);
   next.journal = [{
     kind: 'mainline',
-    text: '周一的账本摊在办公室桌上，沈峤已经在看台下等你。',
+    text: '办公室桌上放着一张空白离开通知，名字那一栏还没有写。',
     minute: next.minute
   }];
+  return next;
+}
+
+function validEpisodeActionState(state, dayIndex) {
+  return isManagementWeekDay(state.dayIndex)
+    && state.dayIndex === dayIndex
+    && state.phase === 'morning';
+}
+
+export function acknowledgeEpisodeNotice(state) {
+  if (!validEpisodeActionState(state, 3)) return addJournal(state, 'quiet', '空白通知现在不在桌上。');
+  if (state.episode.sceneHistory.includes('blank-notice')) return state;
+  const next = copyState(state);
+  next.episode = acknowledgeNotice(next.episode);
+  next.minute += 25;
+  appendManagementJournal(next, 'mainline', '你没有在通知上写名字，而是把三个人的意见记在白板上。');
+  recordManagementAction(next, 'episode-notice', 'ask-everyone');
+  return next;
+}
+
+export function chooseEpisodePromises(state, promiseIds) {
+  if (!validEpisodeActionState(state, 4)) return addJournal(state, 'quiet', '现在还不能答应这一周的请求。');
+  if (state.episode.promisesChosen.length) return state;
+  const next = copyState(state);
+  next.episode = choosePromises(next.episode, promiseIds);
+  next.minute += 30;
+  const labels = next.episode.promisesChosen.map(id => id === 'train' ? '陪小满训练' : id === 'fundraise' ? '和许姨筹钱' : '和林川查旧记录');
+  appendManagementJournal(next, 'promise', `你先答应了${labels.join('，以及')}。第三件事只能晚一点回答。`);
+  recordManagementAction(next, 'episode-promises', next.episode.promisesChosen.join('+'));
+  return next;
+}
+
+export function completeEpisodePromise(state, promiseId, payload = {}) {
+  if (![5, 6].includes(state.dayIndex) || state.phase !== 'morning') {
+    return addJournal(state, 'quiet', '今天没有时间完成这件事。');
+  }
+  if (state.management.dailyRecords.some(record => record.dayIndex === state.dayIndex && record.actionId === 'episode-promise')) {
+    return addJournal(state, 'quiet', '今天已经认真做完一件答应过的事。');
+  }
+  const next = copyState(state);
+  next.episode = completePromise(next.episode, promiseId, payload);
+  next.minute += 70;
+
+  if (promiseId === 'fundraise') {
+    const publicFundraiser = next.episode.fundraisingMode === 'public';
+    next.economy = postLedgerEntry(next.economy, {
+      id: `episode-fundraiser-${next.dayIndex}`,
+      label: '场边小店筹款',
+      amount: next.episode.fundraisingTotal
+    });
+    next.communitySupport = Math.min(100, next.communitySupport + (publicFundraiser ? 5 : 1));
+  }
+  if (promiseId === 'records') {
+    next.governance = applyGovernanceEffect(next.governance, { shenInfluence: -1 });
+  }
+  if (promiseId === 'train') {
+    next.roster.cohesion = Math.min(100, next.roster.cohesion + 2);
+  }
+
+  recordManagementAction(next, 'episode-promise', promiseId);
+  appendManagementJournal(next, 'promise', promiseId === 'train'
+    ? '三次传球结束后，小满第一次主动问你周日准备怎么做。'
+    : promiseId === 'fundraise'
+      ? '最后一位客人离开，小店的铁盒里多了一笔真实的钱。'
+      : '签字、日期和旧照片放到一起，沈峤的名字终于对上了。');
+  syncManagementCash(next);
+  return next;
+}
+
+export function resolveEpisodeFunding(state, choiceId) {
+  if (!validEpisodeActionState(state, 7)) return addJournal(state, 'quiet', '周五的两笔钱还没有摆到一起。');
+  if (state.episode.fridayFundingChoice) return state;
+  const next = copyState(state);
+  next.episode = lockMissedRequest(next.episode);
+  next.episode = resolveFridayFunding(next.episode, choiceId);
+  const costs = { 'pay-lights': 30, 'protect-work': 24, 'shen-advance': 0, 'pay-both': 54 };
+  next.economy = postLedgerEntry(next.economy, {
+    id: `friday-funding-${choiceId}`,
+    label: choiceId === 'pay-lights'
+      ? '灯光复检费'
+      : choiceId === 'protect-work'
+        ? '小满临时工作保障'
+        : choiceId === 'pay-both'
+          ? '灯光与临时工作'
+          : '沈峤无息垫款',
+    amount: -costs[choiceId]
+  });
+  if (['pay-lights', 'pay-both', 'shen-advance'].includes(choiceId)) {
+    next.facilities = prepareFacility(next.facilities, 'floodlights');
+  }
+  if (choiceId === 'shen-advance') {
+    next.governance = applyGovernanceEffect(next.governance, { shenInfluence: 1 });
+  }
+  next.minute += 45;
+  recordManagementAction(next, 'episode-funding', choiceId);
+  appendManagementJournal(next, 'funding', choiceId === 'shen-advance'
+    ? '沈峤补上两笔钱，也拿到了一份书面干预权。'
+    : '灯光和一个人的下一周被放在同一张账单上，你写下了先后顺序。');
+  syncManagementCash(next);
+  return next;
+}
+
+export function acknowledgeEpisodeOffer(state) {
+  if (!validEpisodeActionState(state, 8)) return addJournal(state, 'quiet', '沈峤的工作邀请还没有出现。');
+  if (state.episode.shenOffer !== 'undecided') return state;
+  const next = copyState(state);
+  next.episode = acknowledgeShenOffer(next.episode);
+  next.minute += 35;
+  recordManagementAction(next, 'episode-offer', next.episode.truthKnown ? 'show-card' : 'shen-shows-card');
+  appendManagementJournal(next, 'offer', '小满没有让任何人替他回答。他说比赛以后会先说自己的选择。');
   return next;
 }
 
@@ -568,7 +692,7 @@ export function resolveManagementShortfall(state, route) {
 }
 
 export function startWeeklyMatch(state) {
-  if (state.dayIndex !== 9 || state.phase !== 'morning' || getRequiredAction(state.dayIndex) !== 'play-match') {
+  if (state.dayIndex !== 9 || state.phase !== 'morning' || getRequiredAction(state.dayIndex) !== 'episode-match') {
     return addJournal(state, 'quiet', '比赛还没有到开场的时候。');
   }
   if (state.management.match) return state;
@@ -590,14 +714,16 @@ export function startWeeklyMatch(state) {
 export function chooseMatchHighlight(state, choiceId) {
   if (!state.management?.match || state.management.match.complete) return state;
   const next = copyState(state);
-  next.management.match = resolveHighlight(next.management.match, choiceId);
+  const highlight = HIGHLIGHTS[next.management.match.highlightIndex];
+  next.management.match = resolveHighlight(next.management.match, choiceId, next.episode);
+  next.episode = recordEpisodeMatchChoice(next.episode, highlight.id, choiceId);
   next.minute += 22;
   if (next.management.match.complete) {
     const result = finishMatch(next.management.match);
     next.management.matchResult = result;
     next.roster.cohesion = Math.max(0, Math.min(100, next.roster.cohesion + result.cohesionDelta));
     next.communitySupport = Math.max(0, Math.min(100, next.communitySupport + (result.outcome === 'win' ? 4 : result.outcome === 'draw' ? 2 : 1)));
-    recordManagementAction(next, 'play-match', 'complete');
+    next.episode = resolveXiaomanDecision(next.episode);
     appendManagementJournal(next, 'match', `终场比分是${result.score.home}比${result.score.away}。看台没有立刻散去。`);
   }
   return next;
@@ -606,15 +732,12 @@ export function chooseMatchHighlight(state, choiceId) {
 function settleManagementWeek(state) {
   const next = copyState(state);
   const opponent = getOpponent(next.management.opponentId);
-  const market = MARKET_PLANS[next.management.marketPlan];
-  const welcome = WELCOME_PLANS[next.management.welcomePlan];
   const result = next.management.matchResult;
   const audience = opponent.expectedAudience
     + next.facilities.audienceBonus
-    + market.audience
-    + welcome.audience;
+    + Math.max(0, Math.round((next.communitySupport - 50) * 0.6));
   const resultBonus = result.outcome === 'win' ? 20 : result.outcome === 'draw' ? 10 : 0;
-  const revenue = Math.round(audience * 0.6) + market.revenue + resultBonus;
+  const revenue = Math.round(audience * 0.6) + resultBonus;
   const cashBefore = next.economy.cash;
   next.economy = postLedgerEntry(next.economy, {
     id: 'week-one-match-income',
@@ -638,18 +761,45 @@ function settleManagementWeek(state) {
       cohesion: next.roster.cohesion,
       community: next.communitySupport,
       governance: next.governance.support
-    }
+    },
+    character: buildEpisodeConsequence(next.episode, result)
   };
+  next.episode.consequence = { ...next.management.settlement.character };
   next.management.weekComplete = true;
   next.campaign.week = 1;
   return next;
 }
 
+export function completeEpisodeHearing(state, choiceId) {
+  if (state.dayIndex !== 9 || state.phase !== 'morning' || !state.management.matchResult) {
+    return addJournal(state, 'quiet', '五把椅子还没有搬到中圈。');
+  }
+  if (state.episode.hearingChoice) return state;
+  let next = copyState(state);
+  next.episode = chooseHearing(next.episode, choiceId);
+  recordManagementAction(next, 'episode-match', choiceId);
+  appendManagementJournal(next, 'hearing', '小满先说完自己的决定，五把椅子才开始讨论以后由谁签字。');
+  next = settleManagementWeek(next);
+  next.phase = 'complete';
+  next.minute = 1100;
+  return next;
+}
+
+function episodeDayComplete(state) {
+  if (state.dayIndex === 3) return state.episode.sceneHistory.includes('blank-notice');
+  if (state.dayIndex === 4) return state.episode.promisesChosen.length === 2;
+  if (state.dayIndex === 5) return state.episode.promisesCompleted.length >= 1;
+  if (state.dayIndex === 6) return state.episode.promisesCompleted.length >= 2;
+  if (state.dayIndex === 7) return Boolean(state.episode.fridayFundingChoice);
+  if (state.dayIndex === 8) return state.episode.shenOffer !== 'undecided';
+  if (state.dayIndex === 9) return Boolean(state.episode.hearingChoice);
+  return false;
+}
+
 export function finishManagementDay(state) {
   if (!isManagementWeekDay(state.dayIndex) || state.phase !== 'morning') return state;
-  const requiredAction = getRequiredAction(state.dayIndex);
-  if (!state.management.completedActions.includes(requiredAction)) {
-    return addJournal(state, 'quiet', '今天最重要的决定还没有完成。');
+  if (!episodeDayComplete(state)) {
+    return addJournal(state, 'quiet', '今天最重要的事情还没有做完。');
   }
   if (state.management.shortfallPending) {
     return addJournal(state, 'quiet', '先决定怎么补上账本里的现金缺口。');
@@ -657,7 +807,6 @@ export function finishManagementDay(state) {
   let next = copyState(state);
   next.phase = 'complete';
   next.minute = 1100;
-  if (next.dayIndex === 9) next = settleManagementWeek(next);
   return next;
 }
 
