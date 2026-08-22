@@ -1,0 +1,21 @@
+prototypes/integrated-day/poll-for-value.js
+  s_75ea0eef0bb1af::t_56a7fe8002354e 1-10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8c51136036bef55609a33f6d13f8ffa715e08128",
+  "prompts": {},
+  "sessions": {
+    "s_75ea0eef0bb1af": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fcbfa-c03e-7ec0-9efb-43e75945864c",
+        "model": "unknown"
+      },
+      "human_author": "Chen Quan <242566181+haimuhaimu@users.noreply.github.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
