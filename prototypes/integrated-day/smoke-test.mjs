@@ -1,11 +1,12 @@
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { extname, join, resolve } from 'node:path';
 import { resolveChromePath } from './chrome-path.js';
 import { getOrders } from './daily-content.js';
 import { pollForValue } from './poll-for-value.js';
+import { writeSmokeArtifact } from './smoke-artifact.js';
 
 const chromePath = resolveChromePath();
 const mimeTypes = { '.css': 'text/css', '.html': 'text/html', '.js': 'text/javascript', '.png': 'image/png' };
@@ -183,7 +184,7 @@ async function text(selector) {
 async function capture(name) {
   await sleep(350);
   const shot = await send('Page.captureScreenshot', { format: 'png', fromSurface: true });
-  await writeFile(`/private/tmp/integrated-day-${name}.png`, Buffer.from(shot.data, 'base64'));
+  await writeSmokeArtifact(name, Buffer.from(shot.data, 'base64'));
 }
 
 async function walkAndWait(id, condition) {
