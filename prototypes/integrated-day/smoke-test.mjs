@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { extname, join, resolve } from 'node:path';
 import { resolveChromePath } from './chrome-path.js';
 import { getOrders } from './daily-content.js';
+import { pollForValue } from './poll-for-value.js';
 
 const chromePath = resolveChromePath();
 const mimeTypes = { '.css': 'text/css', '.html': 'text/html', '.js': 'text/javascript', '.png': 'image/png' };
@@ -50,15 +51,16 @@ chrome.stderr.on('data', chunk => { chromeError += chunk.toString(); });
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function waitForDebugger() {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
+  const debuggerUrl = await pollForValue(async () => {
     try {
       const response = await fetch(`http://127.0.0.1:${debugPort}/json/list`);
       const pages = await response.json();
       const page = pages.find(item => item.type === 'page' && item.url.startsWith(pageBaseUrl));
-      if (page?.webSocketDebuggerUrl) return page.webSocketDebuggerUrl;
+      return page?.webSocketDebuggerUrl;
     } catch {}
-    await sleep(100);
-  }
+    return undefined;
+  });
+  if (debuggerUrl) return debuggerUrl;
   throw new Error(`Chrome DevTools did not start. ${chromeError}`);
 }
 
