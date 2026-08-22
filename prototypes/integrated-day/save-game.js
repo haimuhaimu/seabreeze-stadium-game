@@ -1,6 +1,7 @@
-import { migrateV1Record, migrateV2Record } from './save-migration.js';
+import { migrateV1Record, migrateV2Record, migrateV3Record } from './save-migration.js';
 
-export const SAVE_KEY = 'seabreeze-club-save-v3';
+export const SAVE_KEY = 'seabreeze-club-save-v4';
+export const V3_SAVE_KEY = 'seabreeze-club-save-v3';
 export const V2_SAVE_KEY = 'seabreeze-club-save-v2';
 export const LEGACY_SAVE_KEY = 'seabreeze-club-save-v1';
 
@@ -99,6 +100,29 @@ function validEpisode(episode) {
   );
 }
 
+function validNamingRights(namingRights) {
+  const validMatch = namingRights?.match === null || Boolean(
+    Number.isInteger(namingRights.match.highlightIndex)
+    && isFiniteNonNegative(namingRights.match.homeGoals)
+    && isFiniteNonNegative(namingRights.match.awayGoals)
+    && Array.isArray(namingRights.match.choices)
+    && Array.isArray(namingRights.match.callbackIds)
+    && typeof namingRights.match.complete === 'boolean'
+  );
+  return Boolean(
+    namingRights?.id === 'naming-rights'
+    && Array.isArray(namingRights.sceneHistory)
+    && namingRights.freeTime
+    && Array.isArray(namingRights.freeTime.records)
+    && (namingRights.freeTime.activeAction === null || typeof namingRights.freeTime.activeAction === 'object')
+    && (namingRights.voteRoute === null || ['co-name', 'community-save', 'delay'].includes(namingRights.voteRoute))
+    && (namingRights.response === null || ['restore-history', 'name-as-repair', 'after-match'].includes(namingRights.response))
+    && typeof namingRights.weekComplete === 'boolean'
+    && validMatch
+    && (namingRights.settlement === null || typeof namingRights.settlement === 'object')
+  );
+}
+
 function validV1Record(record) {
   return Boolean(
     record
@@ -131,11 +155,31 @@ function validV3State(state) {
   );
 }
 
-export function validateSaveRecord(record) {
+function validV3Record(record) {
   return Boolean(
     record
     && record.version === 3
     && validV3State(record.state)
+    && validPosition(record.position)
+    && MAP_IDS.has(record.mapId)
+  );
+}
+
+function validV4State(state) {
+  return Boolean(
+    state?.version === 4
+    && validPrologueFields(state, 16)
+    && validManagementState(state)
+    && validEpisode(state.episode)
+    && validNamingRights(state.namingRights)
+  );
+}
+
+export function validateSaveRecord(record) {
+  return Boolean(
+    record
+    && record.version === 4
+    && validV4State(record.state)
     && validPosition(record.position)
     && MAP_IDS.has(record.mapId)
   );
@@ -152,13 +196,18 @@ function parseRecord(raw) {
 function closeInterruptedActivities(record) {
   const trainingStarted = record.state.training.started;
   const episodeStarted = Boolean(record.state.episode.activePromise);
-  if (!trainingStarted && !episodeStarted) return record;
+  const freeActionStarted = Boolean(record.state.namingRights?.freeTime?.activeAction);
+  if (!trainingStarted && !episodeStarted && !freeActionStarted) return record;
   return {
     ...record,
     state: {
       ...record.state,
       training: { ...record.state.training, started: false },
-      episode: { ...record.state.episode, activePromise: null }
+      episode: { ...record.state.episode, activePromise: null },
+      namingRights: record.state.namingRights ? {
+        ...record.state.namingRights,
+        freeTime: { ...record.state.namingRights.freeTime, activeAction: null, available: true }
+      } : record.state.namingRights
     }
   };
 }
@@ -167,11 +216,13 @@ function loadAndValidate(raw, version) {
   const parsed = parseRecord(raw);
   if (!parsed.ok) return parsed;
   if (!parsed.record || parsed.record.version !== version) return { ok: false, reason: 'unsupported-version' };
-  const valid = version === 3
+  const valid = version === 4
     ? validateSaveRecord(parsed.record)
-    : version === 2
-      ? validV2Record(parsed.record)
-      : validV1Record(parsed.record);
+    : version === 3
+      ? validV3Record(parsed.record)
+      : version === 2
+        ? validV2Record(parsed.record)
+        : validV1Record(parsed.record);
   if (!valid) return { ok: false, reason: 'invalid-shape' };
   return parsed;
 }
@@ -179,9 +230,16 @@ function loadAndValidate(raw, version) {
 export function loadSave(storage) {
   const currentRaw = storage.getItem(SAVE_KEY);
   if (currentRaw !== null) {
-    const loaded = loadAndValidate(currentRaw, 3);
+    const loaded = loadAndValidate(currentRaw, 4);
     if (!loaded.ok) return loaded;
     return { ok: true, record: closeInterruptedActivities(loaded.record) };
+  }
+
+  const versionThreeRaw = storage.getItem(V3_SAVE_KEY);
+  if (versionThreeRaw !== null) {
+    const loaded = loadAndValidate(versionThreeRaw, 3);
+    if (!loaded.ok) return loaded;
+    return { ok: true, record: closeInterruptedActivities(migrateV3Record(loaded.record)), migrated: true };
   }
 
   const versionTwoRaw = storage.getItem(V2_SAVE_KEY);
@@ -199,7 +257,7 @@ export function loadSave(storage) {
 }
 
 export function writeSave(storage, state, position, mapId = state.world?.mapId ?? 'training') {
-  const record = { version: 3, state, position, mapId };
+  const record = { version: 4, state, position, mapId };
   if (!validateSaveRecord(record)) throw new TypeError('Invalid save record');
   storage.setItem(SAVE_KEY, JSON.stringify(record));
   return record;
@@ -207,7 +265,7 @@ export function writeSave(storage, state, position, mapId = state.world?.mapId ?
 
 export function clearSave(storage) {
   storage.removeItem(SAVE_KEY);
+  storage.removeItem(V3_SAVE_KEY);
   storage.removeItem(V2_SAVE_KEY);
   storage.removeItem(LEGACY_SAVE_KEY);
 }
-

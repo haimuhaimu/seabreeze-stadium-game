@@ -24,7 +24,13 @@ import {
   chooseMatchHighlight,
   completeEpisodeHearing,
   finishManagementDay,
-  advanceCampaignDay
+  advanceCampaignDay,
+  beginNamingRightsWeek,
+  completeNamingMainline,
+  startNamingFreeAction,
+  finishNamingFreeAction,
+  startSecondWeeklyMatch,
+  resolveSecondWeeklyMatchChoice
 } from './game-state.js';
 
 test('a direct entry starts at the visible management week without erasing prologue history', () => {
@@ -204,7 +210,7 @@ test('the management week advances only after the required story action', () => 
 
 test('the first week starts with a fixed opponent and blank notice', () => {
   const state = beginManagementWeek(completedPrologue());
-  assert.equal(state.version, 3);
+  assert.equal(state.version, 4);
   assert.equal(state.management.opponentId, 'city-university');
   assert.equal(state.episode.sceneId, 'blank-notice');
 });
@@ -239,4 +245,92 @@ test('sunday requires the hearing after three highlights', () => {
   assert.ok(state.management.settlement);
   assert.equal(state.management.settlement.character.xiaomanDecision, state.episode.xiaomanDecision);
   assert.deepEqual(state.management.matchResult.score, { home: 2, away: 1 });
+});
+
+function completedFirstWeek() {
+  let state = reachSundayReadyState(['train', 'records'], 'protect-work');
+  state = startWeeklyMatch(state);
+  state = chooseMatchHighlight(state, 'repeat-practice');
+  state = chooseMatchHighlight(state, 'ask-xiaoman');
+  state = chooseMatchHighlight(state, 'share-responsibility');
+  return completeEpisodeHearing(state, 'five-party-week');
+}
+
+function finishNamingAction(state, actionId, choiceId, freeActionId) {
+  state = completeNamingMainline(state, actionId, choiceId);
+  assert.equal(state.phase, 'morning');
+  state = startNamingFreeAction(state, freeActionId);
+  return finishNamingFreeAction(state, { score: 1 });
+}
+
+test('the completed first week opens a fresh naming-rights week without losing its settlement', () => {
+  const firstWeek = completedFirstWeek();
+  const firstSettlement = firstWeek.management.settlement;
+  const state = beginNamingRightsWeek(firstWeek);
+  assert.equal(state.dayIndex, 10);
+  assert.equal(state.phase, 'morning');
+  assert.equal(state.campaign.week, 2);
+  assert.equal(state.namingRights.id, 'naming-rights');
+  assert.deepEqual(state.campaign.weekOneSettlement.score, firstSettlement.score);
+  assert.equal(state.management.opponentId, 'harbor-workers');
+  assert.equal(state.management.weekComplete, false);
+});
+
+test('a naming weekday cannot end until its mainline and one free action are complete', () => {
+  let state = beginNamingRightsWeek(completedFirstWeek());
+  state = completeNamingMainline(state, 'naming-proposal', 'hold-public-vote');
+  state = advanceCampaignDay(state);
+  assert.equal(state.dayIndex, 11);
+
+  const blocked = advanceCampaignDay(state);
+  assert.equal(blocked.dayIndex, 11);
+  state = completeNamingMainline(state, 'naming-chairs', 'write-conditions');
+  assert.equal(state.phase, 'morning');
+  state = startNamingFreeAction(state, 'rest');
+  state = finishNamingFreeAction(state, { score: 0 });
+  assert.equal(state.phase, 'complete');
+  assert.equal(state.energy, 100);
+  state = advanceCampaignDay(state);
+  assert.equal(state.dayIndex, 12);
+});
+
+test('the community route carries free actions into a public sign reveal', () => {
+  let state = beginNamingRightsWeek(completedFirstWeek());
+  state = completeNamingMainline(state, 'naming-proposal', 'hold-public-vote');
+  state = advanceCampaignDay(state);
+  state = finishNamingAction(state, 'naming-chairs', 'write-conditions', 'shop');
+  state = advanceCampaignDay(state);
+  state = finishNamingAction(state, 'naming-alternative', 'open-free-time', 'community');
+  state = advanceCampaignDay(state);
+  state = finishNamingAction(state, 'naming-plaque', 'acknowledge-history', 'shop');
+  state = advanceCampaignDay(state);
+
+  state = completeNamingMainline(state, 'naming-vote', 'community-save');
+  assert.equal(state.namingRights.voteRoute, 'community-save');
+  state = advanceCampaignDay(state);
+  state = finishNamingAction(state, 'naming-response', 'restore-history', 'archive');
+  state = advanceCampaignDay(state);
+  assert.equal(state.dayIndex, 16);
+
+  state = startSecondWeeklyMatch(state);
+  state = resolveSecondWeeklyMatchChoice(state, 'keep-gates-open');
+  state = resolveSecondWeeklyMatchChoice(state, 'steady-everyone');
+  state = resolveSecondWeeklyMatchChoice(state, 'let-name-show');
+  assert.equal(state.namingRights.weekComplete, true);
+  assert.equal(state.namingRights.settlement.stadiumName, '海风球场');
+  assert.equal(state.namingRights.settlement.authority, '五把椅子保留最终决定权');
+  assert.equal(state.namingRights.settlement.rememberedAction, '整理旧照片');
+  assert.equal(state.phase, 'complete');
+  assert.ok(state.management.matchResult.score.home >= 1);
+});
+
+test('co-naming and delay remain reachable without optional-action thresholds', () => {
+  for (const routeId of ['co-name', 'delay']) {
+    let state = beginNamingRightsWeek(completedFirstWeek());
+    state.dayIndex = 14;
+    state.phase = 'morning';
+    state = completeNamingMainline(state, 'naming-vote', routeId);
+    assert.equal(state.namingRights.voteRoute, routeId);
+    assert.equal(state.phase, 'complete');
+  }
 });

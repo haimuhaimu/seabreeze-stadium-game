@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createGameState } from './game-state.js';
 import { createEpisodeState } from './episode-state.js';
-import { SAVE_KEY, V2_SAVE_KEY, LEGACY_SAVE_KEY, loadSave, writeSave, clearSave } from './save-game.js';
+import { SAVE_KEY, V3_SAVE_KEY, V2_SAVE_KEY, LEGACY_SAVE_KEY, loadSave, writeSave, clearSave } from './save-game.js';
 
 function memoryStorage() {
   const values = new Map();
@@ -15,11 +15,11 @@ function memoryStorage() {
 
 test('a save record round-trips without losing state', () => {
   const storage = memoryStorage();
-  const state = { ...createGameState(), version: 3, episode: createEpisodeState() };
+  const state = { ...createGameState(), version: 4, episode: createEpisodeState() };
   writeSave(storage, state, { x: 44, y: 82 });
   assert.deepEqual(loadSave(storage), {
     ok: true,
-    record: { version: 3, state, position: { x: 44, y: 82 }, mapId: 'training' }
+    record: { version: 4, state, position: { x: 44, y: 82 }, mapId: 'training' }
   });
 });
 
@@ -37,16 +37,18 @@ test('bad JSON and unsupported versions are rejected without deletion', () => {
 
 test('invalid shapes are rejected and an interrupted training round is closed', () => {
   const storage = memoryStorage();
-  storage.setItem(SAVE_KEY, JSON.stringify({ version: 3, state: {}, position: { x: 0, y: 0 }, mapId: 'training' }));
+  storage.setItem(SAVE_KEY, JSON.stringify({ version: 4, state: {}, position: { x: 0, y: 0 }, mapId: 'training' }));
   assert.equal(loadSave(storage).reason, 'invalid-shape');
 
-  const state = { ...createGameState(), version: 3, episode: { ...createEpisodeState(), activePromise: 'train' } };
+  const state = { ...createGameState(), version: 4, episode: { ...createEpisodeState(), activePromise: 'train' } };
   state.training.started = true;
+  state.namingRights.freeTime.activeAction = { dayIndex: 11, actionId: 'shop' };
   writeSave(storage, state, { x: 50, y: 89 });
   const loaded = loadSave(storage);
   assert.equal(loaded.ok, true);
   assert.equal(loaded.record.state.training.started, false);
   assert.equal(loaded.record.state.episode.activePromise, null);
+  assert.equal(loaded.record.state.namingRights.freeTime.activeAction, null);
 });
 
 test('a valid version one save migrates in memory without overwriting the legacy record', () => {
@@ -69,7 +71,7 @@ test('a valid version one save migrates in memory without overwriting the legacy
   const loaded = loadSave(storage);
   assert.equal(loaded.ok, true);
   assert.equal(loaded.migrated, true);
-  assert.equal(loaded.record.version, 3);
+  assert.equal(loaded.record.version, 4);
   assert.equal(loaded.record.state.economy.cash, 29);
   assert.equal(loaded.record.state.episode.id, 'last-roster-slot');
   assert.equal(storage.getItem(LEGACY_SAVE_KEY), raw);
@@ -95,7 +97,7 @@ test('an unfinished version two management week restarts spring 15 in memory', (
   const loaded = loadSave(storage);
   assert.equal(loaded.ok, true);
   assert.equal(loaded.migrated, true);
-  assert.equal(loaded.record.version, 3);
+  assert.equal(loaded.record.version, 4);
   assert.equal(loaded.record.state.dayIndex, 3);
   assert.equal(loaded.record.state.phase, 'morning');
   assert.deepEqual(loaded.record.state.repairs, ['awning']);
@@ -108,11 +110,13 @@ test('clearSave removes only the project save key', () => {
   const storage = memoryStorage();
   storage.setItem(SAVE_KEY, JSON.stringify({ anything: true }));
   storage.setItem(V2_SAVE_KEY, JSON.stringify({ legacyWeek: true }));
+  storage.setItem(V3_SAVE_KEY, JSON.stringify({ legacyEpisode: true }));
   storage.setItem(LEGACY_SAVE_KEY, JSON.stringify({ legacy: true }));
   storage.setItem('another-game', 'keep');
   clearSave(storage);
   assert.equal(storage.getItem(SAVE_KEY), null);
   assert.equal(storage.getItem(V2_SAVE_KEY), null);
+  assert.equal(storage.getItem(V3_SAVE_KEY), null);
   assert.equal(storage.getItem(LEGACY_SAVE_KEY), null);
   assert.equal(storage.getItem('another-game'), 'keep');
 });

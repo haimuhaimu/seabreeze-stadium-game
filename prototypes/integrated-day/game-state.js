@@ -1,5 +1,11 @@
 import { getDayContent, getOrders, requiredInventoryForDay } from './daily-content.js';
-import { getCampaignDay, getRequiredAction, isManagementWeekDay } from './campaign-content.js';
+import {
+  getCampaignDay,
+  getRequiredAction,
+  isCampaignDay,
+  isManagementWeekDay,
+  isNamingRightsWeekDay
+} from './campaign-content.js';
 import { createEconomy, postLedgerEntry, resolveShortfall } from './economy-state.js';
 import { createFacilities, FACILITY_PLANS, prepareFacility } from './facility-state.js';
 import { createGovernance, applyGovernanceEffect } from './governance-state.js';
@@ -19,6 +25,22 @@ import {
   chooseHearing,
   buildEpisodeConsequence
 } from './episode-state.js';
+import {
+  chooseNamingResponse,
+  chooseNamingVote,
+  cloneNamingRightsState,
+  completeNamingScene,
+  createNamingRightsState,
+  resolveNamingHighlight,
+  settleNamingWeek,
+  startNamingMatch
+} from './naming-rights-state.js';
+import {
+  finishFreeAction as finishFreeTimeTransition,
+  getFreeActionTotals,
+  startFreeAction as startFreeTimeTransition
+} from './free-time-state.js';
+import { REVEAL_RESPONSES, VOTE_ROUTES, getFreeAction, getNamingDay } from './naming-rights-content.js';
 
 export const GATHERABLES = Object.freeze({
   'tea-a': { inventoryKey: 'tea', label: '茶叶', journal: '花槽里的海岸茶草被风吹得很干净。' },
@@ -79,7 +101,15 @@ function copyState(state) {
     events: [...state.events],
     journal: state.journal.map(entry => ({ ...entry })),
     history: state.history.map(entry => ({ ...entry })),
-    campaign: state.campaign ? { ...state.campaign } : undefined,
+    campaign: state.campaign ? {
+      ...state.campaign,
+      weekOneSettlement: state.campaign.weekOneSettlement ? {
+        ...state.campaign.weekOneSettlement,
+        score: { ...state.campaign.weekOneSettlement.score },
+        metrics: { ...state.campaign.weekOneSettlement.metrics },
+        character: { ...state.campaign.weekOneSettlement.character }
+      } : undefined
+    } : undefined,
     episode: state.episode ? {
       ...state.episode,
       sceneHistory: [...state.episode.sceneHistory],
@@ -96,6 +126,7 @@ function copyState(state) {
     facilities: state.facilities ? { ...state.facilities } : undefined,
     roster: state.roster ? { ...state.roster } : undefined,
     governance: state.governance ? { ...state.governance } : undefined,
+    namingRights: state.namingRights ? cloneNamingRightsState(state.namingRights) : undefined,
     management: state.management ? {
       ...state.management,
       completedActions: [...state.management.completedActions],
@@ -141,7 +172,7 @@ function addEvent(next, eventId) {
 
 export function createGameState() {
   return {
-    version: 3,
+    version: 4,
     dayIndex: 0,
     phase: 'morning',
     minute: 550,
@@ -165,6 +196,7 @@ export function createGameState() {
     facilities: createFacilities(),
     roster: createRoster(),
     governance: createGovernance(),
+    namingRights: createNamingRightsState(),
     communitySupport: 52,
     management: createManagementProgress(),
     world: {
@@ -467,6 +499,38 @@ export function beginManagementWeek(state) {
   next.journal = [{
     kind: 'mainline',
     text: '办公室桌上放着一张空白离开通知，名字那一栏还没有写。',
+    minute: next.minute
+  }];
+  return next;
+}
+
+export function beginNamingRightsWeek(state) {
+  if (state.dayIndex !== 9 || state.phase !== 'complete' || !state.management?.weekComplete) {
+    return addJournal(state, 'quiet', '先把第一周的比赛和五把椅子安顿好。');
+  }
+
+  const next = copyState(state);
+  next.dayIndex = 10;
+  next.phase = 'morning';
+  next.minute = 550;
+  next.energy = 100;
+  next.campaign = {
+    ...next.campaign,
+    week: 2,
+    weekOneSettlement: next.management.settlement ? {
+      ...next.management.settlement,
+      score: { ...next.management.settlement.score },
+      metrics: { ...next.management.settlement.metrics },
+      character: { ...next.management.settlement.character }
+    } : null
+  };
+  next.management = createManagementProgress();
+  next.management.opponentId = 'harbor-workers';
+  next.namingRights = createNamingRightsState();
+  next.world.mapId = 'stadium';
+  next.journal = [{
+    kind: 'mainline',
+    text: '一块过大的蓝色冠名布盖住旧招牌，只剩最后一个“风”字露在外面。',
     minute: next.minute
   }];
   return next;
@@ -785,6 +849,180 @@ export function completeEpisodeHearing(state, choiceId) {
   return next;
 }
 
+function namingMainlineComplete(state) {
+  const sceneId = getNamingDay(state.dayIndex).sceneId;
+  return state.namingRights.sceneHistory.includes(sceneId);
+}
+
+export function completeNamingMainline(state, actionId, choiceId) {
+  if (!isNamingRightsWeekDay(state.dayIndex) || state.phase !== 'morning') {
+    return addJournal(state, 'quiet', '今天还没有这场公开讨论。');
+  }
+  if (getRequiredAction(state.dayIndex) !== actionId || actionId === 'naming-match') {
+    return addJournal(state, 'quiet', '先回应今天摆在球场中央的事。');
+  }
+  if (namingMainlineComplete(state)) return state;
+
+  const next = copyState(state);
+  const sceneId = getNamingDay(next.dayIndex).sceneId;
+  const fixedChoices = {
+    'naming-proposal': 'hold-public-vote',
+    'naming-chairs': 'write-conditions',
+    'naming-alternative': 'open-free-time',
+    'naming-plaque': 'acknowledge-history'
+  };
+
+  if (fixedChoices[actionId]) {
+    if (choiceId !== fixedChoices[actionId]) return addJournal(state, 'quiet', '这句话还没有说清楚。');
+    next.namingRights = completeNamingScene(next.namingRights, sceneId);
+  } else if (actionId === 'naming-vote') {
+    next.namingRights = chooseNamingVote(next.namingRights, choiceId);
+    const route = VOTE_ROUTES[choiceId];
+    if (route.cash !== 0) {
+      next.economy = postLedgerEntry(next.economy, {
+        id: `naming-vote-${choiceId}`,
+        label: choiceId === 'co-name' ? '澜岸联合冠名款' : '夜场改期损失',
+        amount: route.cash
+      });
+    }
+    next.governance = applyGovernanceEffect(next.governance, { shenInfluence: route.shenInfluence });
+    syncManagementCash(next);
+  } else if (actionId === 'naming-response') {
+    if (!REVEAL_RESPONSES[choiceId]) return addJournal(state, 'quiet', '沈峤还在等一个明确回答。');
+    next.namingRights = chooseNamingResponse(next.namingRights, choiceId);
+  }
+
+  next.minute += actionId === 'naming-vote' ? 55 : 30;
+  recordManagementAction(next, actionId, choiceId);
+  appendManagementJournal(next, 'mainline', actionId === 'naming-proposal'
+    ? '你把合同压在五张空白选票下面。周五以前，谁都不能私下签字。'
+    : actionId === 'naming-chairs'
+      ? '五种条件贴满墙面。钱只是其中一张，名字和日常也在上面。'
+      : actionId === 'naming-alternative'
+        ? '你把自救铁盒摆到柜台上，决定每天亲手做一件能留下筹码的事。'
+        : actionId === 'naming-plaque'
+          ? '郭教练承认，当年所有人的沉默让沈峤从创办历史里消失了。'
+          : actionId === 'naming-vote'
+            ? `五张纸票落进铁盒，球场选择了“${VOTE_ROUTES[choiceId].label}”。`
+            : '沈峤听完回答，没有原谅任何人，但也没有再说自己从未被看见。');
+
+  const freeActionDay = getNamingDay(next.dayIndex).freeAction;
+  if (freeActionDay) {
+    next.namingRights.freeTime.available = true;
+  } else {
+    next.phase = 'complete';
+    next.minute = 1100;
+  }
+  return next;
+}
+
+export function startNamingFreeAction(state, actionId) {
+  if (!isNamingRightsWeekDay(state.dayIndex) || state.phase !== 'morning' || !namingMainlineComplete(state)) {
+    return addJournal(state, 'quiet', '先把今天必须回应的事说清楚。');
+  }
+  if (!state.namingRights.freeTime.available) {
+    return addJournal(state, 'quiet', '今天的自由时间已经用完了。');
+  }
+  const next = copyState(state);
+  next.namingRights.freeTime = startFreeTimeTransition(next.namingRights.freeTime, next.dayIndex, actionId);
+  next.minute += 5;
+  appendManagementJournal(next, 'free-time', `${getFreeAction(actionId).owner}在${getFreeAction(actionId).place}等你。`);
+  return next;
+}
+
+export function finishNamingFreeAction(state, result = {}) {
+  if (!state.namingRights?.freeTime?.activeAction) {
+    return addJournal(state, 'quiet', '还没有开始今天的自由行动。');
+  }
+  const next = copyState(state);
+  const actionId = next.namingRights.freeTime.activeAction.actionId;
+  const action = getFreeAction(actionId);
+  const before = getFreeActionTotals(next.namingRights.freeTime);
+  next.namingRights.freeTime = finishFreeTimeTransition(next.namingRights.freeTime, result);
+  const after = getFreeActionTotals(next.namingRights.freeTime);
+  const fundDelta = after.fund - before.fund;
+  if (fundDelta > 0) {
+    next.economy = postLedgerEntry(next.economy, {
+      id: `self-rescue-${next.dayIndex}`,
+      label: '海风自救箱',
+      amount: fundDelta
+    });
+  }
+  next.communitySupport = Math.max(0, Math.min(100, next.communitySupport + after.community - before.community));
+  next.roster.cohesion = Math.max(0, Math.min(100, next.roster.cohesion + after.cohesion - before.cohesion));
+  next.facilities.condition = Math.max(0, Math.min(100, next.facilities.condition + after.facility - before.facility));
+  if (after.evidence > before.evidence) {
+    next.governance = applyGovernanceEffect(next.governance, { support: 1, shenInfluence: -1 });
+  }
+  next.energy = actionId === 'rest' ? 100 : Math.max(0, next.energy - 10);
+  next.minute = 1100;
+  next.phase = 'complete';
+  recordManagementAction(next, 'free-time', actionId);
+  appendManagementJournal(next, 'free-time', action.resultCopy);
+  syncManagementCash(next);
+  return next;
+}
+
+export function startSecondWeeklyMatch(state) {
+  if (state.dayIndex !== 16 || state.phase !== 'morning' || getRequiredAction(state.dayIndex) !== 'naming-match') {
+    return addJournal(state, 'quiet', '招牌下的比赛还没有到开场时间。');
+  }
+  if (state.namingRights.match) return state;
+  const next = copyState(state);
+  next.namingRights = completeNamingScene(next.namingRights, 'under-the-sign');
+  next.namingRights = startNamingMatch(next.namingRights);
+  next.minute = 900;
+  appendManagementJournal(next, 'match', '港口工人队走进球场，蓝色冠名布在开场哨里不停拍打旧招牌。');
+  return next;
+}
+
+export function resolveSecondWeeklyMatchChoice(state, choiceId) {
+  if (!state.namingRights?.match || state.namingRights.match.complete) return state;
+  const next = copyState(state);
+  next.namingRights = resolveNamingHighlight(next.namingRights, choiceId);
+  next.minute += 24;
+  if (!next.namingRights.match.complete) return next;
+
+  const baseSettlement = settleNamingWeek(next.namingRights);
+  const score = baseSettlement.score;
+  const outcome = score.home > score.away ? 'win' : score.home === score.away ? 'draw' : 'loss';
+  const opponent = getOpponent('harbor-workers');
+  const audience = opponent.expectedAudience + Math.max(0, Math.round((next.communitySupport - 50) * 0.7));
+  const revenue = Math.round(audience * 0.55) + (outcome === 'win' ? 18 : outcome === 'draw' ? 8 : 0);
+  next.economy = postLedgerEntry(next.economy, {
+    id: 'week-two-match-income',
+    label: '港口工人队主场收入',
+    amount: revenue
+  });
+  next.communitySupport = Math.min(100, next.communitySupport + (outcome === 'win' ? 4 : outcome === 'draw' ? 2 : 1));
+  next.money = next.economy.cash;
+  const rememberedRecord = [...next.namingRights.freeTime.records].reverse().find(record => record.actionId !== 'rest');
+  next.namingRights.settlement = {
+    ...baseSettlement,
+    audience,
+    revenue,
+    outcome,
+    rememberedAction: rememberedRecord ? getFreeAction(rememberedRecord.actionId).label.replace(/^去|^陪|^修一处/, '') : '病后休息',
+    metrics: {
+      cash: next.economy.cash,
+      facility: next.facilities.condition,
+      cohesion: next.roster.cohesion,
+      community: next.communitySupport,
+      governance: next.governance.support
+    }
+  };
+  next.namingRights.weekComplete = true;
+  next.management.matchResult = { score: { ...score }, outcome };
+  next.management.settlement = { ...next.namingRights.settlement, score: { ...score }, metrics: { ...next.namingRights.settlement.metrics } };
+  next.management.weekComplete = true;
+  next.campaign.week = 2;
+  recordManagementAction(next, 'naming-match', 'sign-reveal');
+  appendManagementJournal(next, 'match', `终场以后蓝布落下，招牌上写着“${baseSettlement.stadiumName}”。`);
+  next.phase = 'complete';
+  next.minute = 1100;
+  return next;
+}
+
 function episodeDayComplete(state) {
   if (state.dayIndex === 3) return state.episode.sceneHistory.includes('blank-notice');
   if (state.dayIndex === 4) return state.episode.promisesChosen.length === 2;
@@ -811,7 +1049,7 @@ export function finishManagementDay(state) {
 }
 
 export function advanceCampaignDay(state) {
-  if (!isManagementWeekDay(state.dayIndex) || state.phase !== 'complete' || state.dayIndex >= 9) return state;
+  if (!isCampaignDay(state.dayIndex) || state.phase !== 'complete' || [9, 16].includes(state.dayIndex)) return state;
   const next = copyState(state);
   next.dayIndex += 1;
   next.phase = 'morning';
@@ -828,7 +1066,7 @@ export function advanceCampaignDay(state) {
 }
 
 export function recordNpcConversation(state, npcId, copy) {
-  if (!isManagementWeekDay(state.dayIndex) || state.phase !== 'morning' || !npcId || !copy) return state;
+  if (!isCampaignDay(state.dayIndex) || state.phase !== 'morning' || !npcId || !copy) return state;
   const next = copyState(state);
   const eventId = `talk-${npcId}-day-${next.dayIndex}`;
   if (!next.events.includes(eventId)) {
