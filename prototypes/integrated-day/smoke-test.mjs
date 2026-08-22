@@ -238,6 +238,21 @@ async function completeEpisodeDay(dayIndex) {
   await waitFor(`window.__integratedDayDebug.getState().dayIndex === ${dayIndex + 1}`, `Episode day ${dayIndex + 1} did not begin`);
 }
 
+async function completeNamingFreeAction(objectId) {
+  await walkAndWait(objectId, '!document.querySelector("[data-episode-activity]").hidden');
+  for (let step = 0; step < 3; step += 1) {
+    await click('[data-free-quality="1"]');
+  }
+  await click('[data-free-finish]');
+  await waitFor('window.__integratedDayDebug.getState().phase === "complete"', 'Naming free action did not finish the day');
+}
+
+async function advanceNamingDay(dayIndex) {
+  await assertInsideViewport('[data-summary]');
+  await click('[data-next-day]');
+  await waitFor(`window.__integratedDayDebug.getState().dayIndex === ${dayIndex + 1}`, `Naming day ${dayIndex + 1} did not begin`);
+}
+
 async function testThreeDayLoop() {
   await navigate();
   const launch = await evaluate(`({
@@ -249,7 +264,7 @@ async function testThreeDayLoop() {
     continueHidden: document.querySelector('[data-continue]').hidden
   })`);
   assert(launch.visible, 'A fresh profile does not show the new launch screen');
-  assert(launch.title.includes('第一周'), 'The launch screen does not make the story week visible');
+  assert(launch.title.includes('两个星期'), 'The launch screen does not make both story weeks visible');
   assert(launch.directLabel === '直接进入春 15 日', 'The direct story-week entry is missing');
   assert(launch.previewLoaded, 'The main stadium preview did not load');
   assert(launch.continueHidden, 'A fresh profile should not offer an absent save');
@@ -538,6 +553,74 @@ async function testThreeDayLoop() {
   assert((await text('[data-save-summary]')).includes('春 21 日'), 'Completed week save has the wrong date');
   await click('[data-continue]');
   await assertInsideViewport('[data-week-summary]');
+
+  assert(!await evaluate('document.querySelector("[data-begin-naming-week]").hidden'), 'The second week entry is missing from the first-week settlement');
+  await click('[data-begin-naming-week]');
+  await waitFor('window.__integratedDayDebug.getState().dayIndex === 10', 'The naming-rights week did not begin');
+  assert(await evaluate('!document.querySelector("[data-stadium-sign]").hidden'), 'The covered stadium sign is missing');
+  assert((await text('[data-care-title]')).includes('蓝布'), 'The naming-rights HUD does not introduce the covered sign');
+
+  await walkAndWait('guest-gate', '!document.querySelector("[data-story-scene]").hidden');
+  assert((await text('[data-story-prop-caption]')).includes('蓝布'), 'The naming proposal is missing its physical prop');
+  assert(await evaluate('getComputedStyle(document.querySelector("[data-story-prop] > div")).backgroundImage.includes("naming-rights-memory-strip-v1.png")'), 'The naming-rights memory strip is not connected');
+  await capture('naming-proposal');
+  await click('[data-story-action="hold-public-vote"]');
+  await advanceNamingDay(10);
+
+  await walkAndWait('stadium-office', '!document.querySelector("[data-story-scene]").hidden');
+  await click('[data-story-action="write-conditions"]');
+  assert(await evaluate('Boolean(document.querySelector("[data-object=free-shop]"))'), 'Free-time choices did not appear after the five conditions');
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 2,
+    mobile: true
+  });
+  await sleep(250);
+  assert(!await evaluate('document.documentElement.scrollWidth > innerWidth'), 'The naming-rights world overflows on mobile');
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 1440,
+    height: 900,
+    deviceScaleFactor: 1,
+    mobile: false
+  });
+  await completeNamingFreeAction('free-shop');
+  await advanceNamingDay(11);
+
+  await walkAndWait('pitch-prep', '!document.querySelector("[data-story-scene]").hidden');
+  await click('[data-story-action="open-free-time"]');
+  await completeNamingFreeAction('free-community');
+  await advanceNamingDay(12);
+
+  await walkAndWait('stadium-office', '!document.querySelector("[data-story-scene]").hidden');
+  assert((await text('[data-story-prop-caption]')).includes('刮掉'), 'The scratched founder plaque is missing');
+  await click('[data-story-action="acknowledge-history"]');
+  assert(await evaluate('Boolean(document.querySelector("[data-object=free-archive]"))'), 'The archive did not unlock after the founder plaque');
+  await completeNamingFreeAction('free-shop');
+  await advanceNamingDay(13);
+
+  await walkAndWait('match-center', '!document.querySelector("[data-story-scene]").hidden');
+  assert(!await evaluate('[...document.querySelectorAll("[data-story-action]")].find(element => element.dataset.storyAction === "naming-vote:community-save").disabled'), 'Community self-rescue did not unlock');
+  await click('[data-story-action="naming-vote:community-save"]');
+  await advanceNamingDay(14);
+
+  await walkAndWait('stadium-office', '!document.querySelector("[data-story-scene]").hidden');
+  await click('[data-story-action="naming-response:restore-history"]');
+  await completeNamingFreeAction('free-archive');
+  await advanceNamingDay(15);
+
+  await walkAndWait('match-center', '!document.querySelector("[data-story-scene]").hidden');
+  await click('[data-story-action="start-naming-match"]');
+  assert((await text('[data-match-home]')) === '海风球场', 'The second match does not use the voted stadium name');
+  for (const choiceId of ['keep-gates-open', 'steady-everyone', 'let-name-show']) {
+    await click(`[data-highlight-choice="${choiceId}"]`);
+  }
+  await waitFor('window.__integratedDayDebug.getState().namingRights.weekComplete', 'The naming-rights week did not settle');
+  await assertInsideViewport('[data-week-summary]');
+  assert((await text('[data-final-stadium-name]')) === '海风球场', 'The final sign has the wrong stadium name');
+  assert((await text('[data-final-authority]')).includes('五把椅子'), 'The final sign does not preserve the voted authority');
+  assert((await text('[data-week-next-crisis]')).includes('强队邀请费'), 'The continuation hook is missing');
+  await capture('naming-final');
 }
 
 let exitCode = 0;
@@ -561,6 +644,7 @@ try {
   console.log('PASS blank notice, Shen reversal, and five-chair hearing');
   console.log('PASS three active promise activities');
   console.log('PASS deterministic callback match and character settlement');
+  console.log('PASS naming-rights week, free-time loop, public vote, and sign reveal');
   assert(pageErrors.length === 0, `Browser errors: ${pageErrors.join(' | ')}`);
   console.log('PASS browser console');
 } catch (error) {
