@@ -36,7 +36,7 @@
 
 ## 验证
 
-全部纯规则测试：
+全部自动化测试：
 
 ```bash
 node --test prototypes/integrated-day/*.test.mjs
@@ -47,6 +47,8 @@ node --test prototypes/integrated-day/*.test.mjs
 ```bash
 node prototypes/integrated-day/smoke-test.mjs
 ```
+
+浏览器验收会优先读取 `CHROME_PATH`，否则从 `PATH` 和 macOS、Linux、Windows 的常见安装位置寻找 Chrome 或 Chromium。
 
 浏览器验收会实际走完春 12 日至春 21 日，验证两地往返、两项承诺、三个主动玩法、周五资金冲突、沈峤反转、比赛回调、五把椅子听证、人物优先的首周结算、存档恢复、1440 × 900 与 390 × 844 布局，以及浏览器控制台错误。
 

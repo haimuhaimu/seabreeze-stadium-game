@@ -31,7 +31,7 @@ node --test prototypes/integrated-day/*.test.mjs
 node prototypes/integrated-day/smoke-test.mjs
 ```
 
-纯规则测试共 61 项。浏览器验收会从春 12 日走到春 21 日，并检查桌面、手机、存档和完整剧情路线。
+游戏规则测试共 61 项，另含浏览器启动路径测试。浏览器验收会从春 12 日走到春 21 日，并检查桌面、手机、存档和完整剧情路线。
 
 ## 当前阶段
 
