@@ -1,0 +1,27 @@
+README.md
+  s_75ea0eef0bb1af::t_55874b53e255fa 34
+prototypes/integrated-day/README.md
+  s_75ea0eef0bb1af::t_e9071a6eed8dfc 39,51-52
+prototypes/integrated-day/chrome-path.js
+  s_75ea0eef0bb1af::t_5d3f8fcfce80c5 1-36
+prototypes/integrated-day/chrome-path.test.mjs
+  s_75ea0eef0bb1af::t_b05693ede4fda6 1-63
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d92ace722fbaa6291c593ac53246f9e36f3b78f0",
+  "prompts": {},
+  "sessions": {
+    "s_75ea0eef0bb1af": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fcbfa-c03e-7ec0-9efb-43e75945864c",
+        "model": "unknown"
+      },
+      "human_author": "Chen Quan <242566181+haimuhaimu@users.noreply.github.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
