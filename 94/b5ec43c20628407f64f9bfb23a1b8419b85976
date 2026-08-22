@@ -1,0 +1,21 @@
+prototypes/integrated-day/smoke-artifact.test.mjs
+  s_75ea0eef0bb1af::t_58f3422fce2264 1-20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "94b5ec43c20628407f64f9bfb23a1b8419b85976",
+  "prompts": {},
+  "sessions": {
+    "s_75ea0eef0bb1af": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fcbfa-c03e-7ec0-9efb-43e75945864c",
+        "model": "unknown"
+      },
+      "human_author": "Chen Quan <242566181+haimuhaimu@users.noreply.github.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
