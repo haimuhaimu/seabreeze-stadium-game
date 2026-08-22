@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#14221b">
-  <title>海风球场：安若童的第一周</title>
+  <title>海风球场：安若童的两个星期</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="./styles.css?v=3">
+  <link rel="stylesheet" href="./styles.css?v=4">
 </head>
 <body>
   <main class="game" data-phase="morning">
@@ -26,6 +26,11 @@
         </div>
         <div class="repair-mark repair-bleachers" data-repair-visual="bleachers" hidden aria-hidden="true">
           <span class="item-sprite item-planks"></span>
+        </div>
+
+        <div class="stadium-name-layer" data-stadium-sign data-sign="hidden" hidden aria-label="海风球场招牌">
+          <span class="stadium-name-old">海风球场</span>
+          <span class="stadium-name-cloth">澜岸体育</span>
         </div>
 
         <div class="morning-layer" data-morning-layer>
@@ -222,7 +227,7 @@
 
       <section class="match-panel" data-match-panel hidden role="dialog" aria-modal="true" aria-label="主场比赛">
         <div class="match-scoreline">
-          <span>海风球场</span>
+          <span data-match-home>海风球场</span>
           <strong data-match-score>0 : 0</strong>
           <span data-match-opponent>客队</span>
         </div>
@@ -295,28 +300,34 @@
         </div>
       </section>
 
-      <section class="week-summary" data-week-summary hidden role="dialog" aria-modal="true" aria-label="第一周结算">
-        <span>春 15 日至春 21 日</span>
+      <section class="week-summary" data-week-summary hidden role="dialog" aria-modal="true" aria-label="经营周结算">
+        <span data-week-range>春 15 日至春 21 日</span>
         <h1 data-week-summary-title>球场撑过了第一周</h1>
         <p data-week-summary-copy></p>
+        <div class="naming-reveal" data-naming-summary hidden>
+          <span>蓝布落下以后</span>
+          <strong data-final-stadium-name>海风球场</strong>
+          <p data-final-authority>五把椅子保留最终决定权</p>
+        </div>
         <div class="week-character" data-week-character>
-          <div><span>小满</span><strong data-week-xiaoman>还没有做出决定</strong></div>
-          <div><span>没来得及的事</span><strong data-week-missed>还没有留下遗憾</strong></div>
-          <div><span>沈峤</span><strong data-week-shen>仍在场外等待</strong></div>
-          <div><span>下周危机</span><strong data-week-next-crisis>球场的决定权仍未落定</strong></div>
+          <div><span data-week-label="first">小满</span><strong data-week-xiaoman>还没有做出决定</strong></div>
+          <div><span data-week-label="second">没来得及的事</span><strong data-week-missed>还没有留下遗憾</strong></div>
+          <div><span data-week-label="third">沈峤</span><strong data-week-shen>仍在场外等待</strong></div>
+          <div><span data-week-label="fourth">下周危机</span><strong data-week-next-crisis>球场的决定权仍未落定</strong></div>
         </div>
         <div class="week-score" data-week-score></div>
         <div class="week-metrics" data-week-metrics></div>
         <strong class="week-next">沈峤没有离开。他把一份新的债权文件交给了罗馆长。</strong>
         <div class="week-actions">
+          <button data-begin-naming-week hidden type="button">进入第二个经营周</button>
           <button data-week-walk type="button">继续在球场走走</button>
           <button data-week-restart type="button">从序章重新开始</button>
         </div>
       </section>
 
       <section class="start-card" data-start-card hidden aria-label="海风球场存档">
-        <span>七日主线已经开放</span>
-        <h1>从场边小店，走进海风球场的第一周</h1>
+        <span>两个经营周已经开放</span>
+        <h1>从场边小店，走进海风球场的两个星期</h1>
         <img class="start-preview" src="./assets/seabreeze-main-stadium-v1.png" alt="海边十一人足球主赛场、双侧看台和周末集市">
         <p data-save-summary></p>
         <div class="start-actions">
@@ -327,6 +338,6 @@
       </section>
     </section>
   </main>
-  <script type="module" src="./game.js?v=3"></script>
+  <script type="module" src="./game.js?v=4"></script>
 </body>
 </html>

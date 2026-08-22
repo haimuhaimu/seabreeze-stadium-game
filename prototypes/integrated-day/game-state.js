@@ -505,7 +505,7 @@ export function beginManagementWeek(state) {
 }
 
 export function beginNamingRightsWeek(state) {
-  if (state.dayIndex !== 9 || state.phase !== 'complete' || !state.management?.weekComplete) {
+  if (state.dayIndex !== 9 || !['complete', 'morning'].includes(state.phase) || !state.management?.weekComplete) {
     return addJournal(state, 'quiet', '先把第一周的比赛和五把椅子安顿好。');
   }
 

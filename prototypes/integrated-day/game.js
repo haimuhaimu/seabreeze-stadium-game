@@ -1,5 +1,12 @@
 import { getDayContent, getOrders, requiredInventoryForDay } from './daily-content.js';
-import { getCampaignDay, getRequiredAction, isPrologueDay, isManagementWeekDay } from './campaign-content.js';
+import {
+  getCampaignDay,
+  getRequiredAction,
+  isCampaignDay,
+  isPrologueDay,
+  isManagementWeekDay,
+  isNamingRightsWeekDay
+} from './campaign-content.js';
 import {
   GATHERABLES,
   REPAIRS,
@@ -27,14 +34,22 @@ import {
   completeEpisodeHearing,
   finishManagementDay,
   advanceCampaignDay,
-  recordNpcConversation
+  recordNpcConversation,
+  beginNamingRightsWeek,
+  completeNamingMainline,
+  startNamingFreeAction,
+  finishNamingFreeAction,
+  startSecondWeeklyMatch,
+  resolveSecondWeeklyMatchChoice
 } from './game-state.js';
 import { loadSave, writeSave, clearSave } from './save-game.js';
 import { TRAINING_TARGETS, createTrainingSession, takeShot } from './training-game.js';
-import { getMap, getMapObjects, canStandOnMap } from './world-content.js';
+import { getMap, getMapObjects, getNamingActionObjects, canStandOnMap } from './world-content.js';
 import { getNpcSchedule } from './npc-schedules.js';
 import { getOpponent } from './opponent-content.js';
 import { getAvailableHighlights } from './match-engine.js';
+import { getAvailableVoteRoutes, getNamingMatchMoment } from './naming-rights-state.js';
+import { getFreeActionTotals } from './free-time-state.js';
 import { PROMISES, getEpisodeDay, getStoryScene } from './episode-content.js';
 import {
   ARCHIVE_CLUES,
@@ -43,6 +58,14 @@ import {
   serveFundraiser,
   takePass
 } from './episode-activities.js';
+import {
+  FREE_ACTIONS,
+  VOTE_ROUTES,
+  REVEAL_RESPONSES,
+  getFreeAction,
+  getNamingDay,
+  getNamingScene
+} from './naming-rights-content.js';
 
 const root = document.querySelector('.game');
 const viewport = document.querySelector('[data-scene]');
@@ -68,6 +91,7 @@ const storyScene = document.querySelector('[data-story-scene]');
 const episodeActivity = document.querySelector('[data-episode-activity]');
 const hearingPanel = document.querySelector('[data-hearing]');
 const weekSummary = document.querySelector('[data-week-summary]');
+const stadiumSign = document.querySelector('[data-stadium-sign]');
 const summaryDim = document.querySelector('[data-summary-dim]');
 const resourceIcon = document.querySelector('.money-slot .item-sprite');
 const touchControls = document.querySelector('.touch-controls');
@@ -116,6 +140,7 @@ let storyReadOnly = false;
 let promiseDraft = [];
 let activeEpisodeActivity = null;
 let activePromiseId = null;
+let activeFreeActivity = null;
 let ledgerOpen = false;
 let weekSummaryDismissed = false;
 const pressedKeys = new Set();
@@ -133,7 +158,14 @@ const MAINLINE_OBJECTS = Object.freeze({
   'episode-promises': 'coach',
   'episode-funding': 'pitch-prep',
   'episode-offer': 'stadium-office',
-  'episode-match': 'match-center'
+  'episode-match': 'match-center',
+  'naming-proposal': 'guest-gate',
+  'naming-chairs': 'stadium-office',
+  'naming-alternative': 'pitch-prep',
+  'naming-plaque': 'stadium-office',
+  'naming-vote': 'match-center',
+  'naming-response': 'stadium-office',
+  'naming-match': 'match-center'
 });
 
 const ACTION_COPY = Object.freeze({
@@ -142,11 +174,55 @@ const ACTION_COPY = Object.freeze({
   'episode-promise': { title: '只来得及两件事', goal: '在两个答应过的请求中，亲自完成今天这一件。' },
   'episode-funding': { title: '灯亮以前', goal: '到主赛场边决定灯光和小满下一周的工作。' },
   'episode-offer': { title: '沈峤的旧球员证', goal: '去主赛场办公室听完沈峤给出的真工作。' },
-  'episode-match': { title: '比赛与五把椅子', goal: '走到中圈。比赛以后，让小满先说自己的选择。' }
+  'episode-match': { title: '比赛与五把椅子', goal: '走到中圈。比赛以后，让小满先说自己的选择。' },
+  'naming-proposal': { title: '蓝布盖住了旧名字', goal: '去入口看看盖在旧招牌上的蓝色冠名布。' },
+  'naming-chairs': { title: '五把椅子，五种条件', goal: '到办公室听完五个席位各自的底线。' },
+  'naming-alternative': { title: '救命钱不是唯一的钱', goal: '去场边看看，今天还能亲手做成哪一件事。' },
+  'naming-plaque': { title: '被刮掉的名字', goal: '旧仓库找到了一块创办人铭牌。去听郭教练说完。' },
+  'naming-vote': { title: '第一次真正表决', goal: '五张纸票已经放在中圈。把你们的办法带过去。' },
+  'naming-response': { title: '沈峤的半张合照', goal: '沈峤带着记者和半张合照来了。去办公室外回应他。' },
+  'naming-match': { title: '招牌下的比赛', goal: '港口工人队已经入场。走到被蓝布盖住的招牌下。' }
 });
 
 const STORY_PROP_MAP = Object.freeze({ 'player-card': 'card' });
 const STORY_PORTRAIT_MAP = Object.freeze({ 'aunt-xu': 'xu' });
+
+const NAMING_PROP_CAPTIONS = Object.freeze({
+  'covered-sign': '蓝布下面，只露出旧名字最后一个字',
+  ballots: '五张纸票，没有一张可以替别人填写',
+  'rescue-box': '许姨从小店里找出的旧铁盒',
+  plaque: '沈峤那一行被人用力刮掉了',
+  contract: '钱和决定权写在同一份协议里',
+  'half-photo': '创办合照被整齐地裁掉了一半'
+});
+
+const FREE_ACTIVITY_SCENES = Object.freeze({
+  shop: Object.freeze([
+    Object.freeze({ title: '跑完步的孩子在等水', copy: '先照顾最需要的人。', options: Object.freeze([['先递温水', 1], ['先问他要不要买套餐', .55], ['让他自己找杯子', .7]]) }),
+    Object.freeze({ title: '看台上的两位老人要一份热食', copy: '他们走得慢，东西要送过去。', options: Object.freeze([['亲自送到座位', 1], ['放在柜台等他们来拿', .65], ['请后面的客人顺手带去', .8]]) }),
+    Object.freeze({ title: '找零以后，铁盒就在手边', copy: '今天的小店收入要留下什么？', options: Object.freeze([['把零钱放进自救箱', 1], ['只放整钞', .75], ['先记账，稍后再放', .6]]) })
+  ]),
+  training: Object.freeze([
+    Object.freeze({ title: '有人跑出了空位', copy: '这次不需要复杂口令。', options: Object.freeze([['把球传给空位的人', 1], ['自己继续带球', .55], ['等教练喊名字', .7]]) }),
+    Object.freeze({ title: '许小满刚刚传丢一球', copy: '他低着头往回走。', options: Object.freeze([['马上把下一球传回去', 1], ['先换另一个人', .55], ['让全队停下来等他', .75]]) }),
+    Object.freeze({ title: '最后一脚留给谁', copy: '替补队员一直站在边线。', options: Object.freeze([['让替补完成最后一脚', 1], ['让主力稳稳结束', .7], ['由安若童自己踢', .6]]) })
+  ]),
+  repair: Object.freeze([
+    Object.freeze({ title: '灯架底座在晃', copy: '风每次吹来，螺帽都会松一点。', options: Object.freeze([['先停电，再拧紧底座', 1], ['直接扶住灯架', .55], ['在旁边立一块提醒牌', .7]]) }),
+    Object.freeze({ title: '看台有一块木板开裂', copy: '周日会有人坐到这里。', options: Object.freeze([['换掉整块木板', 1], ['用胶带贴住裂口', .55], ['把这个座位暂时封住', .8]]) }),
+    Object.freeze({ title: '招牌绳结正在磨损', copy: '蓝布比旧招牌更吃风。', options: Object.freeze([['换绳并打双结', 1], ['再拉紧一点', .65], ['等周日早上处理', .5]]) })
+  ]),
+  community: Object.freeze([
+    Object.freeze({ title: '孩子们想用半块场地', copy: '球队训练还有二十分钟。', options: Object.freeze([['划出一块共享区域', 1], ['让孩子等训练结束', .65], ['今天先请他们回去', .5]]) }),
+    Object.freeze({ title: '入口摊主要借一个插座', copy: '她愿意把今天一部分收入放进自救箱。', options: Object.freeze([['检查线路后接给她', 1], ['让她自己找插座', .6], ['为了安全直接拒绝', .75]]) }),
+    Object.freeze({ title: '有人问为什么要签名', copy: '不是每个人都熟悉球场的账。', options: Object.freeze([['把冠名条件读给大家听', 1], ['只说球场快没钱了', .65], ['让大家先签再解释', .5]]) })
+  ]),
+  archive: Object.freeze([
+    Object.freeze({ title: '旧照片没有写年份', copy: '墙角还有一叠比赛海报。', options: Object.freeze([['按球衣和海报对照', 1], ['凭照片颜色猜年份', .6], ['只保留最清楚的一张', .55]]) }),
+    Object.freeze({ title: '第一份章程有两种墨水', copy: '其中一处签名后来被覆盖。', options: Object.freeze([['对着光检查原签名', 1], ['只抄下现在能见的字', .6], ['请郭教练凭记忆补写', .7]]) }),
+    Object.freeze({ title: '半张合照的另一半在旧信封里', copy: '撕口和沈峤手里那张完全吻合。', options: Object.freeze([['并排拍照，保留原件', 1], ['用胶水直接粘回去', .7], ['把两半分开收好', .65]]) })
+  ])
+});
 
 function isEpisodeDayResolved() {
   if (!isManagementWeekDay(state.dayIndex)) return false;
@@ -159,6 +235,15 @@ function isEpisodeDayResolved() {
   if (state.dayIndex === 8) return state.episode.shenOffer !== 'undecided';
   if (state.dayIndex === 9) return Boolean(state.episode.hearingChoice);
   return false;
+}
+
+function isNamingDayResolved() {
+  if (!isNamingRightsWeekDay(state.dayIndex)) return false;
+  return state.namingRights.sceneHistory.includes(getNamingDay(state.dayIndex).sceneId);
+}
+
+function isCurrentCampaignDayResolved() {
+  return isNamingRightsWeekDay(state.dayIndex) ? isNamingDayResolved() : isEpisodeDayResolved();
 }
 
 function pendingPromiseIds() {
@@ -193,7 +278,7 @@ function rebuildWorldObjects() {
         ...object,
         kind: 'mainline',
         actionId: requiredAction,
-        label: isEpisodeDayResolved()
+        label: isCurrentCampaignDayResolved()
           ? '今天的决定已经完成'
           : requiredAction === 'episode-promises'
             ? '去看小满的七号背心'
@@ -202,12 +287,22 @@ function rebuildWorldObjects() {
     }
   }
 
+  if (isNamingRightsWeekDay(state.dayIndex)) {
+    for (const object of getNamingActionObjects(activeMapId, state.dayIndex, state.namingRights)) {
+      objects[object.id] = { ...object };
+    }
+  }
+
   for (const exit of map.exits) {
     objects[exit.id] = { ...exit, kind: 'exit' };
   }
 
-  const schedules = isManagementWeekDay(state.dayIndex)
-    ? getNpcSchedule(state.dayIndex, state.phase, { opponentId: state.management.opponentId, episode: state.episode })
+  const schedules = isCampaignDay(state.dayIndex)
+    ? getNpcSchedule(state.dayIndex, state.phase, {
+        opponentId: state.management.opponentId,
+        episode: state.episode,
+        namingRights: state.namingRights
+      })
     : [];
   for (const npc of schedules.filter(item => item.mapId === activeMapId)) {
     const guestSide = activeMapId === 'stadium' && npc.x < 15 && npc.y < 50;
@@ -275,11 +370,11 @@ function canStand(x, y) {
 }
 
 function availableObject(id) {
-  if (!hasStarted || trainingActive || activeEpisodeActivity || storySceneId || state.phase !== 'morning') return false;
+  if (!hasStarted || trainingActive || activeEpisodeActivity || activeFreeActivity || storySceneId || state.phase !== 'morning') return false;
   if (GATHERABLES[id] && state.collectedToday.includes(id)) return false;
   const object = worldObjects[id];
   if (!object) return false;
-  if (isManagementWeekDay(state.dayIndex) && object.kind === 'mainline') {
+  if (isCampaignDay(state.dayIndex) && object.kind === 'mainline') {
     if (object.actionId.startsWith('promise:')) {
       const promiseId = object.actionId.split(':')[1];
       return [5, 6].includes(state.dayIndex)
@@ -287,7 +382,7 @@ function availableObject(id) {
         && !state.episode.promisesCompleted.includes(promiseId)
         && !isEpisodeDayResolved();
     }
-    return !isEpisodeDayResolved();
+    return !isCurrentCampaignDayResolved();
   }
   return true;
 }
@@ -347,6 +442,36 @@ function inventoryShortageCopy() {
 }
 
 function phaseDetails() {
+  if (isNamingRightsWeekDay(state.dayIndex)) {
+    const actionId = getRequiredAction(state.dayIndex);
+    const action = ACTION_COPY[actionId];
+    const completed = isNamingDayResolved();
+    const totals = getFreeActionTotals(state.namingRights.freeTime);
+    const activeAction = state.namingRights.freeTime.activeAction;
+    return {
+      title: state.namingRights.weekComplete
+        ? '第二周已经结算'
+        : state.phase === 'complete'
+          ? '今天的选择已经留下'
+          : action.title,
+      goal: state.namingRights.weekComplete
+        ? `蓝布已经落下。这里现在叫${state.namingRights.settlement.stadiumName}。`
+        : state.phase === 'complete'
+          ? state.dayIndex === 16 ? '招牌已经揭开，这一周的结果已经保存。' : '今天已经结束，可以去往下一天。'
+          : !completed
+            ? action.goal
+            : activeAction
+              ? `把${getFreeAction(activeAction.actionId).label}认真做完。`
+              : state.namingRights.freeTime.available
+                ? '主线已经回应。现在可以在球场上选择一件自由行动，也可以休息。'
+                : actionId === 'naming-match'
+                  ? '走进比赛，终场以后揭开招牌。'
+                  : '今天的决定已经完成。',
+      label: '自救金',
+      value: `${totals.fund}元`,
+      icon: 'item-coins'
+    };
+  }
   if (isManagementWeekDay(state.dayIndex)) {
     const actionId = getRequiredAction(state.dayIndex);
     const action = ACTION_COPY[actionId];
@@ -419,13 +544,16 @@ function renderCalendar() {
 
 function renderPhases() {
   const track = document.querySelector('.phase-track');
-  if (isManagementWeekDay(state.dayIndex)) {
-    if (track.dataset.mode !== 'week') {
-      track.dataset.mode = 'week';
+  if (isCampaignDay(state.dayIndex)) {
+    const weekStart = isNamingRightsWeekDay(state.dayIndex) ? 10 : 3;
+    const weekMode = `week-${weekStart}`;
+    if (track.dataset.mode !== weekMode) {
+      track.dataset.mode = weekMode;
       track.classList.add('week-track');
       track.innerHTML = Array.from({ length: 7 }, (_, offset) => {
-        const day = getCampaignDay(offset + 3);
-        return `<li data-week-day="${offset + 3}"><span>${day.weekday}</span><strong>${day.date}日</strong></li>`;
+        const dayIndex = offset + weekStart;
+        const day = getCampaignDay(dayIndex);
+        return `<li data-week-day="${dayIndex}"><span>${day.weekday}</span><strong>${day.date}日</strong></li>`;
       }).join('');
     }
     track.querySelectorAll('[data-week-day]').forEach(step => {
@@ -436,7 +564,7 @@ function renderPhases() {
     return;
   }
 
-  if (track.dataset.mode === 'week') {
+  if (track.dataset.mode?.startsWith('week-')) {
     track.dataset.mode = 'day';
     track.classList.remove('week-track');
     track.innerHTML = [
@@ -513,14 +641,29 @@ function makeWorldButton(id, object) {
     button.append(shadow, sprite, name);
   } else {
     button.classList.add(object.kind === 'exit' ? 'exit-target' : 'mainline-target');
+    if (object.kind === 'free-action') button.classList.add('free-action-target');
     const ring = document.createElement('span');
     ring.className = 'target-ring';
     const marker = document.createElement('span');
     marker.className = object.kind === 'exit' ? 'exit-marker' : 'mainline-marker';
-    marker.textContent = object.kind === 'exit' ? '海风路' : '处理';
+    marker.textContent = object.kind === 'exit' ? '海风路' : object.kind === 'free-action' ? getFreeAction(object.actionId.split(':')[1]).label : '处理';
     button.append(ring, marker);
   }
   return button;
+}
+
+function renderStadiumSign() {
+  const visible = activeMapId === 'stadium' && isNamingRightsWeekDay(state.dayIndex);
+  stadiumSign.hidden = !visible;
+  if (!visible) return;
+  const routeId = state.namingRights.voteRoute;
+  const signMode = routeId === 'co-name' ? 'co-name' : routeId === 'community-save' ? 'community' : routeId === 'delay' ? 'delay' : 'covered';
+  stadiumSign.dataset.sign = signMode;
+  stadiumSign.querySelector('.stadium-name-old').textContent = '海风球场';
+  stadiumSign.querySelector('.stadium-name-cloth').textContent = routeId === 'co-name' ? '澜岸' : '澜岸体育';
+  stadiumSign.setAttribute('aria-label', routeId
+    ? `球场招牌现在是${VOTE_ROUTES[routeId].stadiumName}`
+    : '海风球场旧招牌被蓝色冠名布盖住');
 }
 
 function renderDynamicWorldContent() {
@@ -563,6 +706,7 @@ function renderWorldTargets() {
     ? worldObjects.shop?.actionId === 'promise:fundraise' ? '和许姨开店筹钱' : '场边小店'
     : shopReady ? '可以开店' : '场边小店';
 
+  renderStadiumSign();
   renderDynamicWorldContent();
   updateProximity(true);
 }
@@ -622,6 +766,13 @@ function choiceLabel(actionId, choiceId) {
   }
   if (actionId === 'episode-offer') return '让小满自己回答';
   if (actionId === 'episode-match') return '完成比赛与听证';
+  if (actionId === 'naming-proposal') return '周五公开表决';
+  if (actionId === 'naming-chairs') return '写下五种条件';
+  if (actionId === 'naming-alternative') return '打开每天的自由时间';
+  if (actionId === 'naming-plaque') return '公开承认创办历史';
+  if (actionId === 'naming-vote') return VOTE_ROUTES[choiceId]?.label ?? choiceId;
+  if (actionId === 'naming-response') return REVEAL_RESPONSES[choiceId]?.label ?? choiceId;
+  if (actionId === 'naming-match') return '完成比赛并揭开招牌';
   return choiceId;
 }
 
@@ -676,7 +827,8 @@ function storyOption(id, label, detail = '', disabled = false) {
 function renderStoryScene() {
   storyScene.hidden = !storySceneId;
   if (!storySceneId) return;
-  const scene = getStoryScene(storySceneId);
+  const namingScene = isNamingRightsWeekDay(state.dayIndex);
+  const scene = namingScene ? getNamingScene(storySceneId) : getStoryScene(storySceneId);
   const day = currentDay();
   const portrait = document.querySelector('[data-story-portrait]');
   const prop = document.querySelector('[data-story-prop]');
@@ -691,7 +843,7 @@ function renderStoryScene() {
     card: '沈峤二十年前的旧球员证',
     chairs: '中圈里正好放着五把椅子'
   };
-  document.querySelector('[data-story-prop-caption]').textContent = captions[prop.dataset.prop];
+  document.querySelector('[data-story-prop-caption]').textContent = NAMING_PROP_CAPTIONS[prop.dataset.prop] ?? captions[prop.dataset.prop];
 
   const picker = document.querySelector('[data-promise-picker]');
   const choosingPromises = storySceneId === 'seven-bib' && !storyReadOnly && !state.episode.promisesChosen.length;
@@ -730,6 +882,25 @@ function renderStoryScene() {
   if (!storyReadOnly && storySceneId === 'sunday-match') {
     options = storyOption('start-match', '走进主场', '海岬大学联队已经在另一侧热身');
   }
+  if (namingScene && !storyReadOnly && scene.choices.length) {
+    options = scene.choices.map(choice => storyOption(choice.id, choice.label, choice.detail)).join('');
+  }
+  if (namingScene && !storyReadOnly && storySceneId === 'first-vote') {
+    options = getAvailableVoteRoutes(state.namingRights).map(route => {
+      const missing = route.disabled
+        ? `还缺 ${route.missingFund} 元自救金和 ${route.missingSignatures} 个签名`
+        : route.detail;
+      return storyOption(`naming-vote:${route.id}`, route.label, missing, route.disabled);
+    }).join('');
+  }
+  if (namingScene && !storyReadOnly && storySceneId === 'half-photo') {
+    const evidence = getFreeActionTotals(state.namingRights.freeTime).evidence > 0;
+    options = Object.values(REVEAL_RESPONSES).map(response => storyOption(
+      `naming-response:${response.id}`,
+      response.label,
+      response.id === 'restore-history' && evidence ? '旧照片和章程已经能公开证明他的创办人身份' : response.detail
+    )).join('');
+  }
   document.querySelector('[data-story-options]').innerHTML = options;
 }
 
@@ -762,10 +933,79 @@ function finishEpisodePromiseActivity(fundraisingMode = null) {
   return changed;
 }
 
+function startNamingFreeActivity(actionId) {
+  const previous = state;
+  state = startNamingFreeAction(state, actionId);
+  const started = !previous.namingRights.freeTime.activeAction && Boolean(state.namingRights.freeTime.activeAction);
+  if (!started) {
+    showToast(state.journal.at(-1)?.text);
+    render();
+    return false;
+  }
+  persist();
+  if (actionId === 'rest') {
+    state = finishNamingFreeAction(state, { score: 1 });
+    showToast(state.journal.at(-1)?.text);
+    persist();
+    render();
+    return true;
+  }
+  activeFreeActivity = { actionId, step: 0, scoreTotal: 0, lastChoice: '' };
+  destination = null;
+  pendingInteraction = null;
+  movementRoute = [];
+  render();
+  return true;
+}
+
+function takeNamingFreeChoice(quality, label) {
+  if (!activeFreeActivity || activeFreeActivity.step >= 3) return false;
+  activeFreeActivity = {
+    ...activeFreeActivity,
+    step: activeFreeActivity.step + 1,
+    scoreTotal: activeFreeActivity.scoreTotal + Number(quality),
+    lastChoice: label
+  };
+  renderEpisodeActivity();
+  return true;
+}
+
+function finishNamingFreeActivity() {
+  if (!activeFreeActivity || activeFreeActivity.step < 3) return false;
+  const score = activeFreeActivity.scoreTotal / 3;
+  const previous = state;
+  state = finishNamingFreeAction(state, { score });
+  const changed = state !== previous;
+  if (changed) {
+    showToast(state.journal.at(-1)?.text);
+    persist();
+  }
+  activeFreeActivity = null;
+  render();
+  return changed;
+}
+
 function renderEpisodeActivity() {
-  episodeActivity.hidden = !activeEpisodeActivity;
-  if (!activeEpisodeActivity) return;
+  episodeActivity.hidden = !activeEpisodeActivity && !activeFreeActivity;
+  if (!activeEpisodeActivity && !activeFreeActivity) return;
+  if (activeFreeActivity) {
+    const action = FREE_ACTIONS[activeFreeActivity.actionId];
+    const scenes = FREE_ACTIVITY_SCENES[activeFreeActivity.actionId];
+    document.querySelector('[data-activity-kicker]').textContent = '今天只认真做这一件事';
+    document.querySelector('[data-activity-title]').textContent = action.label;
+    const stage = document.querySelector('[data-activity-stage]');
+    document.querySelector('[data-activity-progress]').textContent = `${activeFreeActivity.step} / 3`;
+    if (activeFreeActivity.step >= 3) {
+      stage.innerHTML = `<h3>这件事今天做完了</h3><p>${action.resultCopy}</p><button type="button" data-free-finish>把结果放进周五的票箱</button>`;
+    } else {
+      const scene = scenes[activeFreeActivity.step];
+      const feedback = activeFreeActivity.lastChoice ? `<small>刚才你选择了：${activeFreeActivity.lastChoice}</small>` : '';
+      stage.innerHTML = `<h3>${scene.title}</h3><p>${scene.copy}</p>${feedback}<div class="activity-choices">${scene.options.map(([label, quality]) => `<button type="button" data-free-quality="${quality}">${label}</button>`).join('')}</div>`;
+    }
+    return;
+  }
   const promise = PROMISES[activePromiseId];
+  document.querySelector('[data-activity-kicker]').textContent = '今天只做一件事';
   document.querySelector('[data-activity-title]').textContent = promise.activityTitle;
   const stage = document.querySelector('[data-activity-stage]');
   let progress = '';
@@ -822,32 +1062,56 @@ function renderHearing() {
 }
 
 function renderMatchPanel() {
-  const match = state.management?.match;
-  const active = decisionAction === 'play-match' && match && !state.management.matchResult;
+  const namingMatch = decisionAction === 'play-naming-match';
+  const match = namingMatch ? state.namingRights?.match : state.management?.match;
+  const active = namingMatch
+    ? Boolean(match && !state.namingRights.weekComplete)
+    : decisionAction === 'play-match' && match && !state.management.matchResult;
   matchPanel.hidden = !active;
   if (!active) return;
-  const opponent = getOpponent(state.management.opponentId);
+  const opponent = getOpponent(namingMatch ? 'harbor-workers' : state.management.opponentId);
+  document.querySelector('[data-match-home]').textContent = namingMatch && state.namingRights.voteRoute
+    ? VOTE_ROUTES[state.namingRights.voteRoute].stadiumName
+    : '海风球场';
   document.querySelector('[data-match-score]').textContent = `${match.homeGoals} : ${match.awayGoals}`;
   document.querySelector('[data-match-opponent]').textContent = opponent.name;
-  const highlight = getAvailableHighlights(match, state.episode);
+  const highlight = namingMatch ? getNamingMatchMoment(state.namingRights) : getAvailableHighlights(match, state.episode);
   document.querySelector('[data-match-minute]').textContent = `第 ${highlight.minute} 分钟`;
   document.querySelector('[data-match-title]').textContent = highlight.title;
   document.querySelector('[data-match-copy]').textContent = highlight.copy;
   document.querySelector('[data-match-options]').innerHTML = highlight.choices.map(choice => (
-    `<button type="button" data-highlight-choice="${choice.id}"><strong>${choice.label}</strong><small>${choice.detail}</small></button>`
+    `<button type="button" data-highlight-choice="${choice.id}"><strong>${choice.label}</strong><small>${namingMatch && choice.callbackReady ? `本周做过的事会回应这个选择。${choice.detail}` : choice.detail}</small></button>`
   )).join('');
 }
 
 function renderManagementMetrics() {
-  const active = isManagementWeekDay(state.dayIndex);
+  const active = isCampaignDay(state.dayIndex);
   const metrics = document.querySelector('[data-management-metrics]');
   const care = document.querySelector('[data-weekly-care]');
   metrics.hidden = !active || !ledgerOpen;
   care.hidden = !active;
   if (!active) return;
-  const careCopy = state.management.weekComplete
-    ? ['这一周留下的决定', state.management.settlement.character.nextCrisis]
-    : state.dayIndex === 3
+  const namingWeek = isNamingRightsWeekDay(state.dayIndex);
+  const totals = namingWeek ? getFreeActionTotals(state.namingRights.freeTime) : null;
+  const careCopy = namingWeek
+    ? state.namingRights.weekComplete
+      ? [state.namingRights.settlement.stadiumName, state.namingRights.settlement.nextCrisis]
+      : state.dayIndex === 10
+        ? ['蓝布盖住了旧名字', '周五以前，谁都不能私下签字']
+        : state.dayIndex === 11
+          ? ['五把椅子的条件', state.namingRights.freeTime.available ? '今天还能亲手做一件事' : '先听完五种底线']
+          : state.dayIndex === 12
+            ? ['海风自救箱', `已有 ${totals.fund} 元，${totals.signatures} 个签名`]
+            : state.dayIndex === 13
+              ? ['被刮掉的名字', totals.evidence ? '完整证据已经整理好' : '承认过去，也要决定现在']
+              : state.dayIndex === 14
+                ? ['五张纸票', state.namingRights.voteRoute ? VOTE_ROUTES[state.namingRights.voteRoute].label : `自救金 ${totals.fund} 元，签名 ${totals.signatures} 个`]
+                : state.dayIndex === 15
+                  ? ['沈峤的半张合照', state.namingRights.response ? REVEAL_RESPONSES[state.namingRights.response].label : '他在等一个明确回答']
+                  : ['招牌下的比赛', state.namingRights.match ? '终场以后揭开招牌' : '港口工人队已经入场']
+    : state.management.weekComplete
+      ? ['这一周留下的决定', state.management.settlement.character.nextCrisis]
+      : state.dayIndex === 3
     ? ['空白通知还没有名字', '先听完每个人']
     : state.dayIndex === 4
       ? ['小满的七号背心', state.episode.promisesChosen.length ? '两项承诺已经写下' : '只能先答应两件事']
@@ -870,6 +1134,11 @@ function renderManagementMetrics() {
 
 function renderManagementControls() {
   const button = document.querySelector('[data-end-management-day]');
+  if (state.dayIndex === 9 && state.management.weekComplete && weekSummaryDismissed) {
+    button.hidden = false;
+    button.textContent = '进入第二个经营周';
+    return;
+  }
   if (!isManagementWeekDay(state.dayIndex) || state.phase !== 'morning' || state.management.weekComplete) {
     button.hidden = true;
     return;
@@ -886,13 +1155,45 @@ function renderManagementControls() {
 
 function renderSummary() {
   const managementDay = isManagementWeekDay(state.dayIndex);
+  const namingDay = isNamingRightsWeekDay(state.dayIndex);
   const complete = state.phase === 'complete'
     && !state.chapterComplete
-    && !(managementDay && state.management.weekComplete);
+    && !((managementDay || namingDay) && state.management.weekComplete);
   summary.hidden = !complete;
   if (!complete) return;
 
   const day = currentDay();
+  if (namingDay) {
+    const records = state.management.dailyRecords.filter(entry => entry.dayIndex === state.dayIndex);
+    const freeRecord = records.find(entry => entry.actionId === 'free-time');
+    const mainlineRecord = records.find(entry => entry.actionId !== 'free-time');
+    const totals = getFreeActionTotals(state.namingRights.freeTime);
+    const dayCopies = {
+      10: '合同没有被任何人私下带走。周五以前，五把椅子会一起听完它。',
+      11: '五种条件都贴在墙上。它们互相冲突，但没有一张被钱盖住。',
+      12: '救命钱之外，球场又多了一件真实做成的事。',
+      13: '沈峤确实被从创办历史里抹去。承认这件事以后，问题变得更难了。',
+      14: `五张票已经落下。球场选择了“${VOTE_ROUTES[state.namingRights.voteRoute]?.label ?? '延期'}”。`,
+      15: '半张合照没有替任何人赢得辩论，但它让所有人不能再否认过去。'
+    };
+    document.querySelector('[data-summary-date]').textContent = `${day.weekday} / 春 ${day.date} 日`;
+    document.querySelector('[data-summary-title]').textContent = ACTION_COPY[getRequiredAction(state.dayIndex)].title;
+    document.querySelector('[data-summary-copy]').textContent = dayCopies[state.dayIndex];
+    document.querySelector('[data-summary-label="orders"]').textContent = '今天做了';
+    document.querySelector('[data-summary-label="repair"]').textContent = '自救金';
+    document.querySelector('[data-summary-label="money"]').textContent = '签名';
+    document.querySelector('[data-summary-label="person"]').textContent = '球场名字';
+    document.querySelector('[data-summary-orders]').textContent = freeRecord
+      ? getFreeAction(freeRecord.choiceId).label
+      : choiceLabel(mainlineRecord?.actionId, mainlineRecord?.choiceId ?? '完成');
+    document.querySelector('[data-summary-repair]').textContent = `${totals.fund} 元`;
+    document.querySelector('[data-summary-money]').textContent = `${totals.signatures} 个`;
+    document.querySelector('[data-summary-person]').textContent = state.namingRights.voteRoute
+      ? VOTE_ROUTES[state.namingRights.voteRoute].stadiumName
+      : '仍被蓝布盖着';
+    document.querySelector('[data-next-day]').textContent = `去往春 ${getCampaignDay(state.dayIndex + 1).date} 日`;
+    return;
+  }
   if (managementDay) {
     const record = state.management.dailyRecords.findLast(entry => entry.dayIndex === state.dayIndex);
     const actionId = getRequiredAction(state.dayIndex);
@@ -947,6 +1248,47 @@ function renderWeekSummary() {
   const settlement = state.management.settlement;
   const opponent = getOpponent(state.management.opponentId);
   const outcomeCopy = settlement.outcome === 'win' ? '赢下' : settlement.outcome === 'draw' ? '战平' : '输给';
+  const namingWeek = isNamingRightsWeekDay(state.dayIndex) && state.namingRights.weekComplete;
+  const namingReveal = document.querySelector('[data-naming-summary]');
+  const beginNamingButton = document.querySelector('[data-begin-naming-week]');
+  if (namingWeek) {
+    const route = VOTE_ROUTES[settlement.route];
+    document.querySelector('[data-week-range]').textContent = '春 22 日至春 28 日';
+    document.querySelector('[data-week-summary-title]').textContent = '球场终于揭开了招牌';
+    document.querySelector('[data-week-summary-copy]').textContent = `${settlement.stadiumName}${outcomeCopy}${opponent.name}，来了${settlement.audience}名观众。终场比分不是唯一结果，球场的名字和决定权也一起留下了。`;
+    namingReveal.hidden = false;
+    document.querySelector('[data-final-stadium-name]').textContent = settlement.stadiumName;
+    document.querySelector('[data-final-authority]').textContent = settlement.authority;
+    document.querySelector('[data-week-label="first"]').textContent = '本周亲手做过';
+    document.querySelector('[data-week-label="second"]').textContent = '公开表决';
+    document.querySelector('[data-week-label="third"]').textContent = '沈峤';
+    document.querySelector('[data-week-label="fourth"]').textContent = '下一件难题';
+    document.querySelector('[data-week-xiaoman]').textContent = settlement.rememberedAction;
+    document.querySelector('[data-week-missed]').textContent = route.label;
+    document.querySelector('[data-week-shen]').textContent = settlement.shenCopy;
+    document.querySelector('[data-week-next-crisis]').textContent = settlement.nextCrisis;
+    document.querySelector('[data-week-score]').textContent = `${settlement.stadiumName} ${settlement.score.home} : ${settlement.score.away} ${opponent.shortName}`;
+    document.querySelector('.week-next').textContent = settlement.nextCrisis;
+    beginNamingButton.hidden = true;
+    const items = [
+      ['现金', `${settlement.metrics.cash}元`],
+      ['球场', settlement.metrics.facility],
+      ['凝聚', settlement.metrics.cohesion],
+      ['社区', settlement.metrics.community],
+      ['委员会', `${settlement.metrics.governance}/5`]
+    ];
+    document.querySelector('[data-week-metrics]').innerHTML = items.map(([label, value]) => (
+      `<div><span>${label}</span><strong>${value}</strong></div>`
+    )).join('');
+    return;
+  }
+  document.querySelector('[data-week-range]').textContent = '春 15 日至春 21 日';
+  namingReveal.hidden = true;
+  beginNamingButton.hidden = false;
+  document.querySelector('[data-week-label="first"]').textContent = '小满';
+  document.querySelector('[data-week-label="second"]').textContent = '没来得及的事';
+  document.querySelector('[data-week-label="third"]').textContent = '沈峤';
+  document.querySelector('[data-week-label="fourth"]').textContent = '下周危机';
   const character = settlement.character;
   document.querySelector('[data-week-summary-title]').textContent = character.xiaomanDecision === 'stay-trial' ? '小满决定再留一周' : '小满决定接受那份工作';
   document.querySelector('[data-week-summary-copy]').textContent = `海风球场${outcomeCopy}${opponent.name}，来了${settlement.audience}名观众。比分已经结束，但这一周真正留下的是谁能替别人作决定。`;
@@ -982,7 +1324,7 @@ function renderTraining() {
   root.classList.toggle('training-active', trainingActive);
   trainingLayer.hidden = !trainingActive;
   const hearingActive = Boolean(state.dayIndex === 9 && state.management?.matchResult && !state.episode.hearingChoice);
-  const managementModal = Boolean(decisionAction || storySceneId || activeEpisodeActivity || hearingActive);
+  const managementModal = Boolean(decisionAction || storySceneId || activeEpisodeActivity || activeFreeActivity || hearingActive);
   touchControls.hidden = trainingActive || state.phase !== 'morning' || managementModal;
   touchAction.hidden = trainingActive || state.phase !== 'morning' || managementModal;
   if (managementModal) prompt.hidden = true;
@@ -1005,9 +1347,9 @@ function renderStartCard() {
   startCard.dataset.hasSave = String(loaded.ok);
   continueButton.hidden = !loaded.ok;
   document.querySelector('[data-save-summary]').textContent = loaded.ok
-    ? `存档停在春 ${currentDay().date} 日。可以继续原进度，也可以直接从那张空白通知开始。`
+    ? `存档停在春 ${currentDay().date} 日。可以继续原进度，也可以从第一周的空白通知重新开始。`
     : loaded.reason === 'absent'
-      ? '新内容从春 15 日开始：一张空白通知、只能完成的两项承诺，以及周日中圈的五把椅子。'
+      ? '现在可以连续体验序章、最后一个名额，以及球场冠名权引发的第二周。'
       : '上次存档无法读取。可以直接进入第一周故事，或从抵达的早晨重新开始。';
 }
 
@@ -1035,8 +1377,8 @@ function renderModals() {
 function render() {
   root.dataset.phase = state.phase;
   root.dataset.day = String(state.dayIndex);
-  root.dataset.mode = isManagementWeekDay(state.dayIndex) ? 'management' : 'prologue';
-  root.dataset.campaign = String(isManagementWeekDay(state.dayIndex));
+  root.dataset.mode = isCampaignDay(state.dayIndex) ? 'management' : 'prologue';
+  root.dataset.campaign = String(isCampaignDay(state.dayIndex));
   const details = phaseDetails();
   renderCalendar();
   document.querySelector('[data-time]').textContent = formatTime(state.minute);
@@ -1052,7 +1394,7 @@ function render() {
   }
 
   const optional = document.querySelector('[data-optional-event]');
-  if (isManagementWeekDay(state.dayIndex)) {
+  if (isCampaignDay(state.dayIndex)) {
     const talked = getNpcSchedule(state.dayIndex, 'morning', { opponentId: state.management.opponentId, episode: state.episode })
       .filter(npc => state.events.includes(`talk-${npc.id}-day-${state.dayIndex}`))
       .map(npc => npc.name);
@@ -1123,7 +1465,7 @@ function resolveTrainingShot(pointer = trainingPointer) {
 }
 
 function openManagementAction(actionId) {
-  if (!isManagementWeekDay(state.dayIndex) || state.phase !== 'morning') return false;
+  if (!isCampaignDay(state.dayIndex) || state.phase !== 'morning') return false;
   notes.hidden = true;
   destination = null;
   pendingInteraction = null;
@@ -1136,7 +1478,14 @@ function openManagementAction(actionId) {
     render();
     return true;
   }
-  openStoryScene(getEpisodeDay(state.dayIndex).sceneId);
+  if (actionId === 'naming-match' && state.namingRights.match && !state.namingRights.weekComplete) {
+    decisionAction = 'play-naming-match';
+    render();
+    return true;
+  }
+  openStoryScene(isNamingRightsWeekDay(state.dayIndex)
+    ? getNamingDay(state.dayIndex).sceneId
+    : getEpisodeDay(state.dayIndex).sceneId);
   return true;
 }
 
@@ -1176,6 +1525,22 @@ function applyStoryAction(actionId) {
     decisionAction = 'play-match';
   } else if (actionId.startsWith('hearing:')) {
     state = completeEpisodeHearing(state, actionId.split(':')[1]);
+  } else if (['hold-public-vote', 'write-conditions', 'open-free-time', 'acknowledge-history'].includes(actionId)) {
+    const requiredAction = getRequiredAction(state.dayIndex);
+    state = completeNamingMainline(state, requiredAction, actionId);
+  } else if (actionId.startsWith('naming-vote:')) {
+    state = completeNamingMainline(state, 'naming-vote', actionId.slice('naming-vote:'.length));
+  } else if (actionId.startsWith('naming-response:')) {
+    state = completeNamingMainline(state, 'naming-response', actionId.slice('naming-response:'.length));
+  } else if (actionId === 'start-naming-match') {
+    state = startSecondWeeklyMatch(state);
+    if (!state.namingRights.match) {
+      showToast(state.journal.at(-1)?.text);
+      render();
+      return false;
+    }
+    storySceneId = null;
+    decisionAction = 'play-naming-match';
   } else {
     return false;
   }
@@ -1193,11 +1558,19 @@ function applyStoryAction(actionId) {
 }
 
 function applyHighlightChoice(choiceId) {
-  if (decisionAction !== 'play-match') return false;
+  if (!['play-match', 'play-naming-match'].includes(decisionAction)) return false;
   const previous = state;
-  state = chooseMatchHighlight(state, choiceId);
+  const namingMatch = decisionAction === 'play-naming-match';
+  state = namingMatch
+    ? resolveSecondWeeklyMatchChoice(state, choiceId)
+    : chooseMatchHighlight(state, choiceId);
   if (state !== previous) persist();
-  if (state.management.matchResult) {
+  if (namingMatch && state.namingRights.weekComplete) {
+    decisionAction = null;
+    weekSummaryDismissed = false;
+    const result = state.namingRights.settlement;
+    showToast(`终场 ${result.score.home} 比 ${result.score.away}。蓝布正在从招牌上落下来。`);
+  } else if (!namingMatch && state.management.matchResult) {
     decisionAction = null;
     const result = state.management.matchResult;
     showToast(`终场 ${result.score.home} 比 ${result.score.away}。${result.crowdMood}。`);
@@ -1276,6 +1649,9 @@ function interact(id) {
   if (object.kind === 'mainline') {
     successful = openManagementAction(object.actionId);
   }
+  if (object.kind === 'free-action') {
+    successful = startNamingFreeActivity(object.actionId.split(':')[1]);
+  }
   return successful;
 }
 
@@ -1335,6 +1711,7 @@ function advanceMovement(deltaSeconds, timestamp) {
     || decisionAction
     || storySceneId
     || activeEpisodeActivity
+    || activeFreeActivity
     || !hearingPanel.hidden
     || state.phase !== 'morning'
     || !summary.hidden
@@ -1448,6 +1825,7 @@ function enterManagementWeek(nextState) {
   storySceneId = null;
   activeEpisodeActivity = null;
   activePromiseId = null;
+  activeFreeActivity = null;
   ledgerOpen = false;
   directWeekArmed = false;
   weekSummaryDismissed = false;
@@ -1478,14 +1856,46 @@ function startDirectManagementWeek() {
   return enterManagementWeek(createFirstWeekEntryState());
 }
 
+function startNamingRightsWeek() {
+  const previous = state;
+  const nextState = beginNamingRightsWeek(state);
+  if (nextState === previous || !isNamingRightsWeekDay(nextState.dayIndex)) {
+    state = nextState;
+    showToast(state.journal.at(-1)?.text);
+    render();
+    return false;
+  }
+  state = nextState;
+  hasStarted = true;
+  activeMapId = 'stadium';
+  state.world.mapId = activeMapId;
+  position = { ...(state.world.positions.stadium ?? getMap('stadium').start) };
+  destination = null;
+  pendingInteraction = null;
+  movementRoute = [];
+  decisionAction = null;
+  storySceneId = null;
+  activeEpisodeActivity = null;
+  activePromiseId = null;
+  activeFreeActivity = null;
+  ledgerOpen = false;
+  weekSummaryDismissed = false;
+  speech.hidden = true;
+  persist();
+  render();
+  fitWorld();
+  showToast('春22日。蓝色冠名布已经盖住旧招牌。');
+  return true;
+}
+
 function goToNextDay() {
   const previousDay = state.dayIndex;
   const previousChapter = state.chapterComplete;
-  state = isManagementWeekDay(state.dayIndex) ? advanceCampaignDay(state) : advanceDay(state);
+  state = isCampaignDay(state.dayIndex) ? advanceCampaignDay(state) : advanceDay(state);
   const successful = state.dayIndex !== previousDay || state.chapterComplete !== previousChapter;
   showToast(state.journal.at(-1)?.text);
   if (state.dayIndex !== previousDay) {
-    activeMapId = isManagementWeekDay(state.dayIndex) ? getCampaignDay(state.dayIndex).defaultMap : 'training';
+    activeMapId = isCampaignDay(state.dayIndex) ? getCampaignDay(state.dayIndex).defaultMap : 'training';
     state.world.mapId = activeMapId;
     position = { ...(state.world.positions[activeMapId] ?? getMap(activeMapId).start) };
     state.world.positions[activeMapId] = { ...position };
@@ -1498,6 +1908,7 @@ function goToNextDay() {
     storySceneId = null;
     activeEpisodeActivity = null;
     activePromiseId = null;
+    activeFreeActivity = null;
     decisionAction = null;
   }
   if (successful) persist();
@@ -1527,6 +1938,7 @@ function resetGame() {
   promiseDraft = [];
   activeEpisodeActivity = null;
   activePromiseId = null;
+  activeFreeActivity = null;
   ledgerOpen = false;
   weekSummaryDismissed = false;
   speech.hidden = true;
@@ -1637,6 +2049,15 @@ document.querySelector('[data-story-close]').addEventListener('click', () => {
 });
 
 document.querySelector('[data-episode-activity]').addEventListener('click', event => {
+  if (activeFreeActivity) {
+    const choice = event.target.closest('[data-free-quality]');
+    if (choice) {
+      takeNamingFreeChoice(Number(choice.dataset.freeQuality), choice.textContent.trim());
+      return;
+    }
+    if (event.target.closest('[data-free-finish]')) finishNamingFreeActivity();
+    return;
+  }
   const pass = event.target.closest('[data-pass-value]');
   if (pass && activeEpisodeActivity?.type === 'train') {
     activeEpisodeActivity = takePass(activeEpisodeActivity, Number(pass.dataset.passValue));
@@ -1666,6 +2087,10 @@ document.querySelector('[data-episode-activity]').addEventListener('click', even
 });
 
 document.querySelector('[data-activity-close]').addEventListener('click', () => {
+  if (activeFreeActivity) {
+    showToast('这件事已经开始了。做完三个小步骤，今天就能安心结束。');
+    return;
+  }
   activeEpisodeActivity = null;
   activePromiseId = null;
   render();
@@ -1678,8 +2103,11 @@ document.querySelector('[data-hearing-options]').addEventListener('click', event
 });
 
 document.querySelector('[data-care-open]').addEventListener('click', () => {
-  if (!isManagementWeekDay(state.dayIndex)) return;
-  openStoryScene(getEpisodeDay(state.dayIndex).sceneId, { readOnly: isEpisodeDayResolved() });
+  if (!isCampaignDay(state.dayIndex)) return;
+  openStoryScene(
+    isNamingRightsWeekDay(state.dayIndex) ? getNamingDay(state.dayIndex).sceneId : getEpisodeDay(state.dayIndex).sceneId,
+    { readOnly: isCurrentCampaignDayResolved() }
+  );
 });
 
 document.querySelector('[data-ledger-toggle]').addEventListener('click', () => {
@@ -1693,6 +2121,10 @@ document.querySelector('[data-match-options]').addEventListener('click', event =
 });
 
 document.querySelector('[data-end-management-day]').addEventListener('click', () => {
+  if (state.dayIndex === 9 && state.management.weekComplete) {
+    startNamingRightsWeek();
+    return;
+  }
   const previous = state;
   state = finishManagementDay(state);
   showToast(state.journal.at(-1)?.text);
@@ -1710,6 +2142,8 @@ document.querySelector('[data-week-walk]').addEventListener('click', () => {
   render();
   viewport.focus();
 });
+
+document.querySelector('[data-begin-naming-week]').addEventListener('click', startNamingRightsWeek);
 
 document.querySelector('[data-week-restart]').addEventListener('click', event => {
   if (!weekResetArmed) {
@@ -1836,6 +2270,9 @@ window.__integratedDayDebug = {
   walkToObject,
   interact,
   openManagementAction,
+  beginNamingRightsWeek: startNamingRightsWeek,
+  startNamingFreeActivity,
+  finishNamingFreeActivity,
   chooseDecision: applyDecisionChoice,
   chooseHighlight: applyHighlightChoice,
   finishManagementDay: () => {

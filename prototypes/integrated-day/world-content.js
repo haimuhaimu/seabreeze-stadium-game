@@ -117,6 +117,50 @@ export function getMapObjects(mapId) {
   return getMap(mapId).objects;
 }
 
+const NAMING_ACTION_OBJECTS = Object.freeze([
+  Object.freeze({
+    id: 'free-shop', actionId: 'free:shop', x: 83, y: 64, approach: Object.freeze({ x: 84, y: 68 }),
+    route: Object.freeze([Object.freeze({ x: 84, y: 88 }), Object.freeze({ x: 84, y: 68 })]),
+    kind: 'free-action', label: '去场边小店帮许姨'
+  }),
+  Object.freeze({
+    id: 'free-training', actionId: 'free:training', x: 52, y: 48, approach: Object.freeze({ x: 52, y: 68 }),
+    route: Object.freeze([Object.freeze({ x: 84, y: 88 }), Object.freeze({ x: 84, y: 68 })]),
+    kind: 'free-action', label: '去中圈陪球队训练'
+  }),
+  Object.freeze({
+    id: 'free-repair', actionId: 'free:repair', x: 72, y: 64, approach: Object.freeze({ x: 84, y: 68 }),
+    route: Object.freeze([Object.freeze({ x: 84, y: 88 }), Object.freeze({ x: 84, y: 68 })]),
+    kind: 'free-action', label: '和林川检查球场隐患'
+  }),
+  Object.freeze({
+    id: 'free-community', actionId: 'free:community', x: 7, y: 30, approach: Object.freeze({ x: 4, y: 40 }),
+    route: Object.freeze([Object.freeze({ x: 30, y: 68 }), Object.freeze({ x: 4, y: 68 })]),
+    kind: 'free-action', label: '到入口开放社区时段'
+  }),
+  Object.freeze({
+    id: 'free-archive', actionId: 'free:archive', x: 70, y: 65, approach: Object.freeze({ x: 84, y: 68 }),
+    route: Object.freeze([Object.freeze({ x: 84, y: 88 }), Object.freeze({ x: 84, y: 68 })]),
+    kind: 'free-action', label: '进旧仓库整理创办资料'
+  }),
+  Object.freeze({
+    id: 'free-rest', actionId: 'free:rest', x: 86, y: 87, approach: Object.freeze({ x: 84, y: 88 }),
+    route: Object.freeze([]), kind: 'free-action', label: '坐在海边长椅上休息'
+  })
+]);
+
+export function getNamingActionObjects(mapId, dayIndex, namingRights) {
+  if (mapId !== 'stadium' || !namingRights?.freeTime?.available || namingRights.freeTime.activeAction) return [];
+  if (namingRights.freeTime.records.some(record => record.dayIndex === dayIndex)) return [];
+  return NAMING_ACTION_OBJECTS
+    .filter(object => object.actionId !== 'free:archive' || dayIndex >= 13)
+    .map(object => ({
+      ...object,
+      approach: { ...object.approach },
+      route: object.route.map(point => ({ ...point }))
+    }));
+}
+
 export function canStandOnMap(mapId, x, y) {
   const map = getMap(mapId);
   if (!Number.isFinite(x) || !Number.isFinite(y) || x < 1.5 || x > 98 || y < 16 || y > 96) return false;

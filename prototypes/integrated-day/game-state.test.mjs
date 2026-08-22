@@ -276,6 +276,13 @@ test('the completed first week opens a fresh naming-rights week without losing i
   assert.equal(state.management.weekComplete, false);
 });
 
+test('walking around after the first-week summary does not lock the second week', () => {
+  const firstWeek = { ...completedFirstWeek(), phase: 'morning' };
+  const state = beginNamingRightsWeek(firstWeek);
+  assert.equal(state.dayIndex, 10);
+  assert.equal(state.campaign.week, 2);
+});
+
 test('a naming weekday cannot end until its mainline and one free action are complete', () => {
   let state = beginNamingRightsWeek(completedFirstWeek());
   state = completeNamingMainline(state, 'naming-proposal', 'hold-public-vote');

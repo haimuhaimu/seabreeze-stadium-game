@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MAPS, canStandOnMap } from './world-content.js';
+import { MAPS, canStandOnMap, getNamingActionObjects } from './world-content.js';
 import { getNpcSchedule } from './npc-schedules.js';
 
 test('training and stadium maps have reciprocal exits and safe spawn points', () => {
@@ -53,4 +53,46 @@ test('spring 17 can expose all three promise locations on existing maps', () => 
 test('each core character takes initiative in the episode', () => {
   const ids = new Set([3, 4, 5, 6, 7, 8, 9].flatMap(day => getNpcSchedule(day).map(npc => npc.id)));
   for (const id of ['coach-guo', 'lin-chuan', 'aunt-xu', 'xiaoman', 'shen-qiao']) assert.ok(ids.has(id));
+});
+
+test('second-week free time exposes human-scale actions on walkable stadium paths', () => {
+  const namingRights = {
+    freeTime: { available: true, activeAction: null, records: [] }
+  };
+  const objects = getNamingActionObjects('stadium', 12, namingRights);
+  assert.deepEqual(objects.map(item => item.actionId).sort(), [
+    'free:community',
+    'free:repair',
+    'free:rest',
+    'free:shop',
+    'free:training'
+  ]);
+  for (const object of objects) {
+    assert.equal(canStandOnMap('stadium', object.approach.x, object.approach.y), true);
+  }
+});
+
+test('the archive appears only after the scratched plaque is discovered', () => {
+  const namingRights = {
+    freeTime: { available: true, activeAction: null, records: [] }
+  };
+  assert.equal(getNamingActionObjects('stadium', 12, namingRights).some(item => item.actionId === 'free:archive'), false);
+  assert.equal(getNamingActionObjects('stadium', 13, namingRights).some(item => item.actionId === 'free:archive'), true);
+  assert.equal(getNamingActionObjects('stadium', 15, namingRights).some(item => item.actionId === 'free:archive'), true);
+});
+
+test('spent or inactive free time removes action targets', () => {
+  const spent = {
+    freeTime: { available: false, activeAction: null, records: [{ dayIndex: 11, actionId: 'rest' }] }
+  };
+  assert.deepEqual(getNamingActionObjects('stadium', 11, spent), []);
+  assert.deepEqual(getNamingActionObjects('training', 11, spent), []);
+});
+
+test('the second week lets every central character take a position on the name', () => {
+  const ids = new Set([10, 11, 12, 13, 14, 15, 16].flatMap(day => getNpcSchedule(day).map(npc => npc.id)));
+  for (const id of ['coach-guo', 'lin-chuan', 'aunt-xu', 'xiaoman', 'shen-qiao', 'director-luo']) assert.ok(ids.has(id));
+  const plaqueDay = getNpcSchedule(13);
+  assert.match(plaqueDay.find(npc => npc.id === 'coach-guo').copy, /没拦|刮掉|对不起/);
+  assert.match(plaqueDay.find(npc => npc.id === 'shen-qiao').copy, /创办|名字|欠/);
 });
