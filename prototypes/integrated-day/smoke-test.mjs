@@ -273,6 +273,48 @@ async function loadQualifiedEliteFixture() {
   return prepared;
 }
 
+async function loadUnqualifiedSeasonFixture() {
+  await evaluate(`(async () => {
+    const { writeSave } = await import('./save-game.js');
+    const game = window.__integratedDayDebug.getState();
+    game.dayIndex = 23;
+    game.phase = 'complete';
+    game.minute = 1100;
+    game.world.mapId = 'stadium';
+    game.season.active = true;
+    game.season.seasonNumber = 1;
+    game.season.roundIndex = 6;
+    game.season.projects = { stands: 1, clinic: 0, academy: 0, market: 0, lights: 0 };
+    game.season.week = {
+      actions: ['rest', 'shop-day', 'maintenance'],
+      talkedNpcIds: [],
+      npcResponses: {},
+      helpTags: [],
+      memoryNpcIds: [],
+      eventId: null,
+      eventChoiceId: null,
+      eventTag: null,
+      roundComplete: true,
+      result: { opponentId: 'harbor-workers', homeGoals: 0, awayGoals: 2, points: 0 }
+    };
+    game.season.match = null;
+    game.season.seasonComplete = true;
+    game.season.eliteQualified = false;
+    game.season.goals = {
+      ranking: { complete: false, current: 7, target: 4 },
+      construction: { complete: false, current: 1, target: 6 },
+      people: { complete: false, current: 1, target: 3 },
+      finance: { complete: false, current: game.economy.cash, target: 180 },
+      eliteQualified: false
+    };
+    writeSave(localStorage, game, { x: 52, y: 68 }, 'stadium');
+    return true;
+  })()`);
+  await navigate();
+  await click('[data-continue]');
+  await waitFor('!document.querySelector("[data-season-summary]").hidden', 'The unqualified season summary did not restore');
+}
+
 async function completeEpisodeDay(dayIndex) {
   assert(await evaluate(`window.__integratedDayDebug.getState().dayIndex === ${dayIndex}`), `Episode day ${dayIndex} did not begin`);
   await waitFor('!document.querySelector("[data-end-management-day]").hidden', 'Management day cannot be closed');
@@ -795,6 +837,12 @@ async function testThreeDayLoop() {
   assert((await text('[data-season-memory-source]')).includes('还记得第 1 轮'), 'The previous incident disappeared before the next decision');
   assert((await text('[data-season-npc-copy]')).includes('那道白线'), 'Xiaoman forgot the previous incident in the next round');
   await click('[data-season-conversation-close]');
+
+  await loadUnqualifiedSeasonFixture();
+  assert(!(await text('[data-season-summary-title]')).includes('精英邀请赛资格'), 'An unqualified season incorrectly received an elite invitation');
+  assert((await text('[data-season-next]')) === '带着这些进入下一赛季', 'An unqualified season cannot continue building next season');
+  await click('[data-season-next]');
+  await waitFor('window.__integratedDayDebug.getState().season.seasonNumber === 2', 'The unqualified route did not open another season');
 
   const eliteBefore = await loadQualifiedEliteFixture();
   assert((await text('[data-season-summary-title]')).includes('精英邀请赛资格'), 'The qualified season summary does not announce the invitation');
