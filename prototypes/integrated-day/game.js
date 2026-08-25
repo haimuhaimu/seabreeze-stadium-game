@@ -43,6 +43,7 @@ import {
   resolveSecondWeeklyMatchChoice,
   beginLeagueSeason,
   chooseSeasonAction,
+  chooseSeasonEventDecision,
   chooseSeasonNpcResponse,
   buildSeasonProject,
   startLeagueMatch,
@@ -84,6 +85,7 @@ import {
   getSeasonProject,
   getSeasonRound
 } from './season-content.js';
+import { SEASON_EVENTS, getSeasonEvent, getSeasonEventChoice } from './season-events.js';
 
 const root = document.querySelector('.game');
 const viewport = document.querySelector('[data-scene]');
@@ -110,6 +112,7 @@ const episodeActivity = document.querySelector('[data-episode-activity]');
 const hearingPanel = document.querySelector('[data-hearing]');
 const weekSummary = document.querySelector('[data-week-summary]');
 const seasonConversation = document.querySelector('[data-season-conversation]');
+const seasonEventPanel = document.querySelector('[data-season-event]');
 const seasonBoard = document.querySelector('[data-season-board]');
 const seasonSummary = document.querySelector('[data-season-summary]');
 const seasonDocket = document.querySelector('[data-season-docket]');
@@ -166,6 +169,7 @@ let activeFreeActivity = null;
 let ledgerOpen = false;
 let weekSummaryDismissed = false;
 let activeSeasonNpcId = null;
+let activeSeasonEventId = null;
 let seasonBoardOpen = false;
 const pressedKeys = new Set();
 
@@ -496,6 +500,9 @@ function phaseDetails() {
     const actions = state.season.week.actions.length;
     const talked = state.season.week.talkedNpcIds.length;
     const rank = getStandings(state.season).findIndex(row => row.teamId === 'haifeng') + 1;
+    const event = getSeasonEvent(state.season.roundIndex, state.season.seasonNumber);
+    const eventPending = !state.season.week.eventChoiceId;
+    const eventPlace = event.mapId === 'training' ? '旧训练场' : '海风主赛场';
     return {
       title: state.season.seasonComplete
         ? `第 ${state.season.seasonNumber} 赛季结束`
@@ -507,8 +514,10 @@ function phaseDetails() {
           ? `最终排名第 ${rank}。建设和关系会保留到下个赛季。`
           : '本轮积分已经更新。准备好后进入下一轮。'
         : actions < 3
-          ? `本轮对阵${opponent.name}。在两座场地安排三件事，也可以先和人谈谈。已谈 ${talked} 人。`
-          : '三项安排已经完成。去主赛场中圈进入本轮比赛。',
+          ? `本轮对阵${opponent.name}。安排三件事，也可以先和人谈谈。${eventPending ? `${eventPlace}还有一件事：${event.title}。` : ''}已谈 ${talked} 人。`
+          : eventPending
+            ? `三项安排已经完成。去${eventPlace}回应“${event.title}”。`
+            : '三项安排和本轮事件都已处理。去主赛场中圈进入比赛。',
       label: '现金',
       value: `${state.economy.cash}元`,
       icon: 'item-coins'
@@ -729,7 +738,9 @@ function makeWorldButton(id, object) {
   } else {
     button.classList.add(object.kind === 'exit' ? 'exit-target' : 'mainline-target');
     if (object.kind === 'free-action') button.classList.add('free-action-target');
-    if (object.kind.startsWith('season-')) button.classList.add('season-world-target', object.kind);
+    if (object.kind.startsWith('season-')) {
+      button.classList.add('season-world-target', object.kind === 'season-event' ? 'season-event-target' : object.kind);
+    }
     const ring = document.createElement('span');
     ring.className = 'target-ring';
     const marker = document.createElement('span');
@@ -742,6 +753,8 @@ function makeWorldButton(id, object) {
           ? SEASON_ACTIONS[object.actionId].label
           : object.kind === 'season-project'
             ? `${getSeasonProject(object.projectId).label} ${state.season.projects[object.projectId]}/3`
+            : object.kind === 'season-event'
+              ? '回应本轮事件'
             : object.kind === 'season-match'
               ? '进入本轮比赛'
               : '处理';
@@ -1298,6 +1311,12 @@ function renderSeasonDocket() {
   document.querySelector('[data-season-opponent]').textContent = `对阵${opponent.name}`;
   document.querySelector('[data-season-rank]').textContent = `当前第 ${seasonRank()} 名`;
   document.querySelector('[data-season-actions]').textContent = `行动 ${state.season.week.actions.length} / 3`;
+  const event = getSeasonEvent(state.season.roundIndex, state.season.seasonNumber);
+  const status = document.querySelector('[data-season-incident-status]');
+  status.textContent = state.season.week.eventChoiceId
+    ? `已回应：${getSeasonEventChoice(event.id, state.season.week.eventChoiceId).label}`
+    : `待回应：${event.title}`;
+  status.classList.toggle('complete', Boolean(state.season.week.eventChoiceId));
 }
 
 function renderSeasonConversation() {
@@ -1321,6 +1340,52 @@ function renderSeasonConversation() {
       )).join('');
 }
 
+function seasonEventEffectCopy(choice) {
+  const labels = {
+    cash: '现金', attack: '进攻', defense: '防守', cohesion: '凝聚', community: '社区',
+    facility: '球场', energy: '体力', support: '委员会', shenInfluence: '沈峤影响'
+  };
+  const effects = Object.entries(choice.effects)
+    .filter(([, value]) => value)
+    .map(([key, value]) => `${labels[key]} ${value > 0 ? '+' : ''}${value}`);
+  const relationships = Object.entries(choice.relationships)
+    .filter(([, value]) => value)
+    .map(([npcId, value]) => `${getSeasonNpc(npcId).name}关系 ${value > 0 ? '+' : ''}${value}`);
+  return [...effects, ...relationships].join(' / ');
+}
+
+function renderSeasonEvent() {
+  const active = isLeagueSeason() && Boolean(activeSeasonEventId);
+  seasonEventPanel.hidden = !active;
+  if (!active) return;
+  const event = SEASON_EVENTS.find(item => item.id === activeSeasonEventId);
+  if (!event) {
+    activeSeasonEventId = null;
+    seasonEventPanel.hidden = true;
+    return;
+  }
+  const speaker = getSeasonNpc(event.speakerId);
+  const selected = state.season.week.eventId === event.id && state.season.week.eventChoiceId
+    ? getSeasonEventChoice(event.id, state.season.week.eventChoiceId)
+    : null;
+  document.querySelector('[data-season-event-kicker]').textContent = event.kicker;
+  document.querySelector('[data-season-event-place]').textContent = event.mapId === 'training' ? '旧训练场' : '海风主赛场';
+  document.querySelector('[data-season-event-speaker]').textContent = `${speaker.name}带来的事`;
+  document.querySelector('[data-season-event-title]').textContent = event.title;
+  document.querySelector('[data-season-event-sprite]').className = `npc-sprite ${speaker.spriteClass}`;
+  document.querySelector('[data-season-event-beats]').innerHTML = event.beats.map(beat => `<p>${beat}</p>`).join('');
+  const options = document.querySelector('[data-season-event-options]');
+  options.hidden = Boolean(selected);
+  options.innerHTML = selected ? '' : event.choices.map(choice => (
+    `<button type="button" data-season-event-choice="${choice.id}"><strong>${choice.label}</strong><span>${choice.detail}</span><small>${seasonEventEffectCopy(choice)}</small></button>`
+  )).join('');
+  const result = document.querySelector('[data-season-event-result]');
+  result.hidden = !selected;
+  result.innerHTML = selected
+    ? `<span>这轮已经决定</span><strong>${selected.label}</strong><p>${selected.resultCopy}</p><small>${seasonEventEffectCopy(selected)}</small>`
+    : '';
+}
+
 function renderSeasonBoard() {
   const active = isLeagueSeason() && seasonBoardOpen;
   seasonBoard.hidden = !active;
@@ -1342,6 +1407,14 @@ function renderSeasonBoard() {
     const next = project.levels[level];
     return `<div><span>${project.label}</span><strong>${level} / 3</strong><small>${next ? `下一步 ${next.label} · ${next.cost} 元` : '已经稳定运营'}</small></div>`;
   }).join('');
+  const history = state.season.eventHistory ?? [];
+  document.querySelector('[data-season-history]').innerHTML = history.length
+    ? history.slice(-3).reverse().map(item => {
+        const event = SEASON_EVENTS.find(candidate => candidate.id === item.eventId);
+        const choice = getSeasonEventChoice(item.eventId, item.choiceId);
+        return `<div><span>第 ${item.seasonNumber} 赛季第 ${item.round} 轮</span><strong>${event.title}</strong><small>${choice.label}</small></div>`;
+      }).join('')
+    : '<p>第一件事还在球场里等你回应。</p>';
 }
 
 function renderSeasonSummary() {
@@ -1361,6 +1434,13 @@ function renderSeasonSummary() {
     : `本轮的三项行动、建设和谈话都已经结算。下一轮会换一个对手，也会出现新的关系回应。`;
   document.querySelector('[data-season-summary-score]').textContent = `海风 ${result.homeGoals} : ${result.awayGoals} ${opponent.shortName}`;
   document.querySelector('[data-season-summary-rank]').textContent = `当前第 ${rank} 名 · ${state.season.standings.find(row => row.teamId === 'haifeng').points} 分`;
+  const event = getSeasonEvent(state.season.roundIndex, state.season.seasonNumber);
+  const eventChoice = state.season.week.eventChoiceId
+    ? getSeasonEventChoice(event.id, state.season.week.eventChoiceId)
+    : null;
+  document.querySelector('[data-season-summary-event]').innerHTML = eventChoice
+    ? `<span>本轮发生了</span><strong>${event.title}</strong><small>${eventChoice.label}</small>`
+    : '<span>旧赛季记录</span><strong>这轮没有留下事件选择</strong><small>下一轮会正常出现新的球场事件</small>';
   const goals = getSeasonGoalStatus(state.season, { cash: state.economy.cash });
   document.querySelector('[data-season-summary-grid]').innerHTML = [
     ['本轮行动', `${state.season.week.actions.length} 件`],
@@ -1577,7 +1657,7 @@ function renderTraining() {
   root.classList.toggle('training-active', trainingActive);
   trainingLayer.hidden = !trainingActive;
   const hearingActive = Boolean(state.dayIndex === 9 && state.management?.matchResult && !state.episode.hearingChoice);
-  const managementModal = Boolean(decisionAction || storySceneId || activeEpisodeActivity || activeFreeActivity || hearingActive || activeSeasonNpcId || seasonBoardOpen || !seasonSummary.hidden);
+  const managementModal = Boolean(decisionAction || storySceneId || activeEpisodeActivity || activeFreeActivity || hearingActive || activeSeasonNpcId || activeSeasonEventId || seasonBoardOpen || !seasonSummary.hidden);
   touchControls.hidden = trainingActive || state.phase !== 'morning' || managementModal;
   touchAction.hidden = trainingActive || state.phase !== 'morning' || managementModal;
   if (managementModal) prompt.hidden = true;
@@ -1618,6 +1698,7 @@ function renderModals() {
   renderMatchPanel();
   renderHearing();
   renderSeasonConversation();
+  renderSeasonEvent();
   renderSeasonBoard();
   renderSeasonSummary();
   renderStartCard();
@@ -1630,6 +1711,7 @@ function renderModals() {
     && matchPanel.hidden
     && hearingPanel.hidden
     && seasonConversation.hidden
+    && seasonEventPanel.hidden
     && seasonBoard.hidden
     && seasonSummary.hidden
     && startCard.hidden;
@@ -1955,6 +2037,14 @@ function interact(id) {
     render();
     successful = true;
   }
+  if (object.kind === 'season-event') {
+    activeSeasonEventId = object.eventId;
+    destination = null;
+    pendingInteraction = null;
+    movementRoute = [];
+    render();
+    successful = true;
+  }
   if (object.kind === 'season-match') {
     const previous = state;
     state = startLeagueMatch(state);
@@ -2028,6 +2118,7 @@ function advanceMovement(deltaSeconds, timestamp) {
     || activeEpisodeActivity
     || activeFreeActivity
     || activeSeasonNpcId
+    || activeSeasonEventId
     || seasonBoardOpen
     || !hearingPanel.hidden
     || state.phase !== 'morning'
@@ -2145,6 +2236,7 @@ function enterManagementWeek(nextState) {
   activePromiseId = null;
   activeFreeActivity = null;
   activeSeasonNpcId = null;
+  activeSeasonEventId = null;
   seasonBoardOpen = false;
   ledgerOpen = false;
   directWeekArmed = false;
@@ -2229,6 +2321,7 @@ function enterLeagueSeason() {
   activePromiseId = null;
   activeFreeActivity = null;
   activeSeasonNpcId = null;
+  activeSeasonEventId = null;
   seasonBoardOpen = false;
   ledgerOpen = false;
   weekSummaryDismissed = true;
@@ -2253,6 +2346,7 @@ function continueLeagueSeason() {
   movementRoute = [];
   decisionAction = null;
   activeSeasonNpcId = null;
+  activeSeasonEventId = null;
   seasonBoardOpen = false;
   notes.hidden = true;
   persist();
@@ -2314,6 +2408,7 @@ function resetGame() {
   activePromiseId = null;
   activeFreeActivity = null;
   activeSeasonNpcId = null;
+  activeSeasonEventId = null;
   seasonBoardOpen = false;
   ledgerOpen = false;
   weekSummaryDismissed = false;
@@ -2412,6 +2507,24 @@ document.querySelector('[data-season-response-options]').addEventListener('click
 
 document.querySelector('[data-season-conversation-close]').addEventListener('click', () => {
   activeSeasonNpcId = null;
+  render();
+  viewport.focus();
+});
+
+document.querySelector('[data-season-event-options]').addEventListener('click', event => {
+  const button = event.target.closest('[data-season-event-choice]');
+  if (!button || !activeSeasonEventId || state.season.week.eventChoiceId) return;
+  const previous = state;
+  state = chooseSeasonEventDecision(state, activeSeasonEventId, button.dataset.seasonEventChoice);
+  if (state !== previous && state.season.week.eventChoiceId) {
+    showToast(state.journal.at(-1)?.text);
+    persist();
+  }
+  render();
+});
+
+document.querySelector('[data-season-event-close]').addEventListener('click', () => {
+  activeSeasonEventId = null;
   render();
   viewport.focus();
 });

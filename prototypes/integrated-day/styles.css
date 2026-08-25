@@ -349,6 +349,7 @@ kbd {
 
 .season-action .mainline-marker { border-color: #8e493e; background: #c95f4d; }
 .season-project .mainline-marker { border-color: #275d6b; background: #34788a; }
+.season-event-target .mainline-marker { border-color: #7a4d33; background: #f0d39a; color: #20363d; }
 .season-match .mainline-marker { border-color: #775c2f; background: #d3a64f; color: #17313a; }
 .season-world-target .mainline-marker::before {
   content: "本轮可安排";
@@ -358,6 +359,7 @@ kbd {
   font-size: 7px;
 }
 .season-match .mainline-marker::before { content: "三项行动已完成"; color: #4e3d1e; }
+.season-event-target .mainline-marker::before { content: "这轮发生了一件事"; color: #6d4936; }
 
 .exit-target:hover .exit-marker,
 .exit-target.nearby .exit-marker,
@@ -1179,6 +1181,8 @@ kbd {
 .season-docket small { display: flex; align-items: center; gap: 7px; color: #b8cbce; font-size: 9px; }
 .season-docket small i { width: 1px; height: 10px; background: rgb(228 242 244 / 22%); }
 .season-docket small b { font-weight: 700; }
+.season-docket .season-incident-line { margin-top: 6px; padding-top: 6px; border-top: 1px solid rgb(228 242 244 / 16%); color: #f0d39a; }
+.season-docket [data-season-incident-status].complete { color: #9cc7ba; }
 .season-docket > button:hover { border-color: #dc735f; background: rgb(20 51 60 / 97%); }
 
 .care-card,
@@ -1539,6 +1543,7 @@ kbd {
 .management-day-control:active { transform: translateY(1px); }
 
 .season-conversation,
+.season-event,
 .season-board,
 .season-summary {
   position: fixed;
@@ -1599,6 +1604,60 @@ kbd {
 .season-response-options small { color: #5d7479; font-size: 9px; line-height: 1.5; }
 .season-talked-note { margin: 0; padding: 13px; border: 1px solid rgb(38 76 85 / 18%); border-radius: 8px; color: #526a70; font-size: 11px; }
 
+.season-event { width: min(720px, calc(100vw - 34px)); padding: 22px 24px 24px; }
+.season-event-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.season-event-heading span,
+.season-event-heading strong { display: block; }
+.season-event-heading span { color: #b95748; font-size: 9px; font-weight: 900; }
+.season-event-heading strong { margin-top: 3px; color: #597278; font-size: 10px; }
+.season-event-heading button {
+  flex: 0 0 auto;
+  padding: 6px 9px;
+  border: 1px solid #78939a;
+  border-radius: 7px;
+  background: transparent;
+  color: #36535b;
+  cursor: pointer;
+  font-size: 9px;
+}
+.season-event-person { margin: 10px 0 8px; display: grid; grid-template-columns: 62px 1fr; align-items: end; gap: 14px; }
+.season-event-person > .npc-sprite { position: relative; left: auto; bottom: auto; width: 48px; height: 112px; transform: none; }
+.season-event-person div { align-self: center; }
+.season-event-person div > span { color: #647a80; font-size: 9px; font-weight: 800; }
+.season-event-person h2 { margin: 3px 0 0; font-size: clamp(25px, 5vw, 40px); line-height: 1.05; letter-spacing: -.04em; }
+.season-event-beats { padding: 11px 14px; border-left: 3px solid #c95f4d; background: rgb(255 255 255 / 36%); }
+.season-event-beats p { margin: 0; color: #38545b; font-size: 12px; line-height: 1.65; }
+.season-event-beats p + p { margin-top: 5px; }
+.season-event-options { margin-top: 12px; display: grid; gap: 8px; }
+.season-event-options button {
+  min-width: 0;
+  padding: 11px 13px;
+  display: grid;
+  grid-template-columns: minmax(150px, .75fr) 1.25fr;
+  gap: 3px 14px;
+  border: 1px solid #80989e;
+  border-bottom-width: 3px;
+  border-radius: 9px;
+  background: rgb(255 255 255 / 42%);
+  color: #20363d;
+  cursor: pointer;
+  text-align: left;
+  transition: transform 130ms var(--ease), background 130ms ease, border-color 130ms ease;
+}
+.season-event-options button:hover { border-color: #b95748; background: rgb(255 255 255 / 78%); transform: translateY(-1px); }
+.season-event-options button:active { transform: translateY(1px); }
+.season-event-options strong { grid-row: 1 / 3; align-self: center; font-size: 12px; }
+.season-event-options span { color: #456168; font-size: 10px; line-height: 1.45; }
+.season-event-options small { color: #9a4c40; font-size: 8px; line-height: 1.45; }
+.season-event-result { margin-top: 12px; padding: 15px 16px; border: 1px solid #6f9287; border-radius: 9px; background: #c9dfd6; }
+.season-event-result span,
+.season-event-result strong,
+.season-event-result small { display: block; }
+.season-event-result span { color: #4c7065; font-size: 8px; font-weight: 900; }
+.season-event-result strong { margin-top: 3px; font-size: 17px; }
+.season-event-result p { margin: 8px 0; color: #36554d; font-size: 11px; line-height: 1.6; }
+.season-event-result small { color: #52756b; font-size: 8px; }
+
 .season-board { width: min(920px, calc(100vw - 34px)); padding: 23px; }
 .season-board-heading { position: relative; padding-right: 100px; }
 .season-board-heading span,
@@ -1626,6 +1685,16 @@ kbd {
 .season-projects span,
 .season-projects strong { font-size: 10px; }
 .season-projects small { grid-column: 1 / -1; color: #657b80; font-size: 8px; }
+.season-history-title { margin-top: 15px !important; }
+.season-history { display: grid; gap: 6px; }
+.season-history > div { padding: 8px 9px; border-left: 2px solid #c95f4d; background: rgb(255 255 255 / 28%); }
+.season-history span,
+.season-history strong,
+.season-history small { display: block; }
+.season-history span { color: #6b8085; font-size: 7px; }
+.season-history strong { margin: 2px 0; font-size: 10px; }
+.season-history small { color: #a14e42; font-size: 8px; }
+.season-history > p { margin: 0; padding: 10px; color: #647b80; font-size: 9px; }
 
 .season-summary { width: min(640px, calc(100vw - 34px)); padding: 25px 26px 22px; }
 .season-summary > span { color: #b95748; font-size: 9px; font-weight: 900; letter-spacing: .08em; }
@@ -1634,6 +1703,10 @@ kbd {
 .season-score-card { margin: 17px 0 8px; padding: 14px; display: flex; align-items: center; justify-content: space-between; gap: 16px; border: 1px solid rgb(38 76 85 / 18%); border-radius: 9px; background: #c95f4d; color: #fff; }
 .season-score-card strong { font: 900 clamp(20px, 4vw, 30px) ui-monospace, monospace; }
 .season-score-card span { font-size: 10px; font-weight: 800; }
+.season-summary-event { padding: 10px 12px; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 9px; border-left: 3px solid #c95f4d; background: rgb(255 255 255 / 32%); }
+.season-summary-event span { color: #657b80; font-size: 8px; }
+.season-summary-event strong { font-size: 11px; }
+.season-summary-event small { color: #a14e42; font-size: 9px; font-weight: 800; }
 .season-summary-grid { margin: 10px 0 17px; display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid rgb(38 76 85 / 18%); border-bottom: 1px solid rgb(38 76 85 / 18%); }
 .season-summary-grid div { padding: 10px 7px; border-right: 1px solid rgb(38 76 85 / 14%); }
 .season-summary-grid div:last-child { border-right: 0; }
@@ -1890,6 +1963,7 @@ kbd {
   .weekly-care { left: 9px; top: 82px; width: min(292px, calc(100vw - 18px)); }
   .season-docket { left: 9px; top: 82px; width: min(292px, calc(100vw - 18px)); }
   .game[data-campaign="true"] .management-metrics { top: 146px; }
+  .game[data-season="true"] .management-metrics { top: 172px; }
 
   .hotbar {
     bottom: max(9px, env(safe-area-inset-bottom));
@@ -1983,16 +2057,25 @@ kbd {
   .decision-panel,
   .match-panel { width: calc(100vw - 18px); max-height: calc(100dvh - 18px); padding: 17px 15px; }
   .season-conversation,
+  .season-event,
   .season-board,
   .season-summary { width: calc(100vw - 18px); max-height: calc(100dvh - 18px); padding: 16px; }
   .season-conversation-person { padding-right: 72px; }
   .season-conversation-person > .npc-sprite { height: 96px; background-size: 600% 100%; }
   .season-response-options button { grid-template-columns: 1fr; gap: 3px; }
+  .season-event-person { grid-template-columns: 50px 1fr; gap: 8px; }
+  .season-event-person > .npc-sprite { width: 42px; height: 94px; }
+  .season-event-person h2 { font-size: clamp(24px, 8vw, 34px); }
+  .season-event-beats { padding: 9px 11px; }
+  .season-event-beats p { font-size: 11px; }
+  .season-event-options button { grid-template-columns: 1fr; gap: 3px; }
+  .season-event-options strong { grid-row: auto; }
   .season-board-layout { grid-template-columns: 1fr; gap: 16px; }
   .season-goals { grid-template-columns: 1fr 1fr; }
   .season-standing-row { grid-template-columns: 20px 1fr 22px 50px 42px; padding-inline: 6px; }
   .season-summary-grid { grid-template-columns: repeat(2, 1fr); }
   .season-summary-grid div:nth-child(2) { border-right: 0; }
+  .season-summary-event { grid-template-columns: 1fr; gap: 2px; }
   .season-summary-actions { grid-template-columns: 1fr; }
   .story-scene {
     width: calc(100vw - 18px);

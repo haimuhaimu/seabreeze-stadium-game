@@ -1,3 +1,5 @@
+import { getSeasonEvent } from './season-events.js';
+
 const freezeMap = map => Object.freeze({
   ...map,
   start: Object.freeze({ ...map.start }),
@@ -227,6 +229,45 @@ const SEASON_MATCH_OBJECT = Object.freeze({
   kind: 'season-match', label: '进入本轮联赛'
 });
 
+const SEASON_EVENT_LOCATIONS = Object.freeze({
+  'training-sideline': Object.freeze({
+    x: 61, y: 63, approach: Object.freeze({ x: 61, y: 71 }), route: Object.freeze([])
+  }),
+  'stadium-drain': Object.freeze({
+    x: 72, y: 64, approach: Object.freeze({ x: 76, y: 68 }),
+    route: Object.freeze([Object.freeze({ x: 84, y: 88 }), Object.freeze({ x: 84, y: 68 })])
+  }),
+  'training-bench': Object.freeze({
+    x: 55, y: 55, approach: Object.freeze({ x: 55, y: 64 }), route: Object.freeze([])
+  }),
+  'stadium-office': Object.freeze({
+    x: 70, y: 65, approach: Object.freeze({ x: 67, y: 68 }),
+    route: Object.freeze([Object.freeze({ x: 84, y: 88 }), Object.freeze({ x: 84, y: 68 })])
+  }),
+  'training-shop': Object.freeze({
+    x: 82, y: 32, approach: Object.freeze({ x: 82, y: 42 }), route: Object.freeze([])
+  }),
+  'guest-gate': Object.freeze({
+    x: 7, y: 30, approach: Object.freeze({ x: 4, y: 40 }),
+    route: Object.freeze([Object.freeze({ x: 30, y: 68 }), Object.freeze({ x: 4, y: 68 })])
+  })
+});
+
+function getSeasonEventObject(season) {
+  if (season.week.eventChoiceId) return null;
+  const event = getSeasonEvent(season.roundIndex, season.seasonNumber);
+  const location = SEASON_EVENT_LOCATIONS[event.locationId];
+  if (!location) throw new TypeError('Unknown season event location');
+  return {
+    id: `season-event-${event.id}`,
+    eventId: event.id,
+    mapId: event.mapId,
+    ...location,
+    kind: 'season-event',
+    label: `回应本轮事件：${event.title}`
+  };
+}
+
 function cloneWorldObject(object) {
   return {
     ...object,
@@ -238,7 +279,9 @@ function cloneWorldObject(object) {
 export function getSeasonWorldObjects(mapId, season) {
   getMap(mapId);
   if (!season?.active || season.seasonComplete || season.week?.roundComplete || season.match) return [];
+  const eventObject = getSeasonEventObject(season);
   if (season.week.actions.length === 3) {
+    if (eventObject) return eventObject.mapId === mapId ? [cloneWorldObject(eventObject)] : [];
     return mapId === 'stadium' ? [cloneWorldObject(SEASON_MATCH_OBJECT)] : [];
   }
   const completed = new Set(season.week.actions);
@@ -248,7 +291,8 @@ export function getSeasonWorldObjects(mapId, season) {
     && season.projects[object.projectId] < 3
     && !completed.has(`build:${object.projectId}`)
   ));
-  return [...actions, ...projects].map(cloneWorldObject);
+  const eventObjects = eventObject?.mapId === mapId ? [eventObject] : [];
+  return [...actions, ...projects, ...eventObjects].map(cloneWorldObject);
 }
 
 export function getNamingActionObjects(mapId, dayIndex, namingRights) {

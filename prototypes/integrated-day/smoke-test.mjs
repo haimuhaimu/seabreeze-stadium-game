@@ -664,6 +664,38 @@ async function testThreeDayLoop() {
   assert(await evaluate('window.__integratedDayDebug.getState().season.projects.stands === 1'), 'The first permanent stand upgrade was not built');
   assert((await text('[data-season-actions]')) === '行动 3 / 3', 'The weekly action counter did not fill');
 
+  assert(!await evaluate('Boolean(document.querySelector("[data-object=season-match-center]"))'), 'The match opened before the round incident was answered');
+  await walkAndWait('to-training', 'window.__integratedDayDebug.getMapId() === "training"');
+  await walkAndWait('season-event-shared-pitch', '!document.querySelector("[data-season-event]").hidden');
+  assert((await text('[data-season-event-title]')) === '谁先用半块场地', 'The first authored incident did not open');
+  assert(await evaluate('document.querySelectorAll("[data-season-event-choice]").length === 3'), 'The incident does not offer three distinct decisions');
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 2,
+    mobile: true
+  });
+  await sleep(250);
+  assert(!await evaluate('document.documentElement.scrollWidth > innerWidth'), 'The league incident overflows on mobile');
+  await assertInsideViewport('[data-season-event]');
+  await capture('league-incident-mobile');
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 1440,
+    height: 900,
+    deviceScaleFactor: 1,
+    mobile: false
+  });
+  await click('[data-season-event-choice="share-half"]');
+  assert(await evaluate('window.__integratedDayDebug.getState().season.week.eventChoiceId === "share-half"'), 'The incident decision was not saved');
+  assert(await evaluate('window.__integratedDayDebug.getState().season.week.actions.length === 3'), 'The incident incorrectly spent a weekly action');
+  assert((await text('[data-season-incident-status]')).includes('已回应'), 'The league docket did not remember the incident');
+  assert(!await evaluate('document.querySelector("[data-season-event-result]").hidden'), 'The incident consequence was not shown');
+  await click('[data-season-event-close]');
+  await click('[data-season-board-open]');
+  assert(await evaluate('document.querySelectorAll(".season-history > div").length === 1'), 'The season handbook did not record the incident');
+  await click('[data-season-board-close]');
+  await walkAndWait('to-stadium', 'window.__integratedDayDebug.getMapId() === "stadium"');
+
   await walkAndWait('season-match-center', '!document.querySelector("[data-match-panel]").hidden');
   await click('[data-highlight-choice="use-attack-work"]');
   const secondMoment = await evaluate(`({
@@ -677,6 +709,7 @@ async function testThreeDayLoop() {
   await waitFor('window.__integratedDayDebug.getState().season.week.roundComplete', 'The first league match did not settle');
   await assertInsideViewport('[data-season-summary]');
   assert((await text('[data-season-summary-rank]')).includes('当前第'), 'The round summary does not show the live rank');
+  assert((await text('[data-season-summary-event]')).includes('谁先用半块场地'), 'The round summary forgot the authored incident');
   await capture('league-round-summary');
   await click('[data-season-next]');
   await waitFor('window.__integratedDayDebug.getState().season.roundIndex === 1', 'The second league round did not open');
@@ -706,7 +739,7 @@ try {
   console.log('PASS three active promise activities');
   console.log('PASS deterministic callback match and character settlement');
   console.log('PASS naming-rights week, free-time loop, public vote, and sign reveal');
-  console.log('PASS repeatable league round, NPC bond, construction, match, and standings');
+  console.log('PASS repeatable league round, authored incident, NPC bond, construction, match, and standings');
   assert(pageErrors.length === 0, `Browser errors: ${pageErrors.join(' | ')}`);
   console.log('PASS browser console');
 } catch (error) {

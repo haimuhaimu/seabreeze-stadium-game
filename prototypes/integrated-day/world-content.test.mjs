@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MAPS, canStandOnMap, getNamingActionObjects, getSeasonWorldObjects } from './world-content.js';
 import { getNpcSchedule } from './npc-schedules.js';
-import { beginSeason, createSeasonState, recordSeasonAction, upgradeSeasonProject } from './season-state.js';
+import { beginSeason, createSeasonState, recordSeasonAction, resolveSeasonEvent, upgradeSeasonProject } from './season-state.js';
+import { getSeasonEvent } from './season-events.js';
 
 test('training and stadium maps have reciprocal exits and safe spawn points', () => {
   assert.equal(MAPS.training.exits[0].targetMap, 'stadium');
@@ -103,6 +104,7 @@ test('the league places seven weekly actions and five construction sites in the 
   const objects = ['training', 'stadium'].flatMap(mapId => getSeasonWorldObjects(mapId, season));
   assert.equal(objects.filter(item => item.kind === 'season-action').length, 7);
   assert.equal(objects.filter(item => item.kind === 'season-project').length, 5);
+  assert.equal(objects.filter(item => item.kind === 'season-event').length, 1);
   for (const object of objects) {
     assert.equal(canStandOnMap(object.mapId, object.approach.x, object.approach.y), true, object.id);
     const map = MAPS[object.mapId];
@@ -115,15 +117,39 @@ test('the league places seven weekly actions and five construction sites in the 
   }
 });
 
-test('completed league work leaves the map and the match target opens after three actions', () => {
+test('all nine league incidents appear at a reachable physical location', () => {
+  const found = new Set();
+  for (let seasonNumber = 1; seasonNumber <= 3; seasonNumber += 1) {
+    for (let roundIndex = 0; roundIndex < 7; roundIndex += 1) {
+      const season = beginSeason(createSeasonState());
+      season.seasonNumber = seasonNumber;
+      season.roundIndex = roundIndex;
+      const expected = getSeasonEvent(roundIndex, seasonNumber);
+      const objects = ['training', 'stadium'].flatMap(mapId => getSeasonWorldObjects(mapId, season));
+      const eventObject = objects.find(item => item.kind === 'season-event');
+      assert.equal(eventObject.eventId, expected.id);
+      assert.equal(eventObject.mapId, expected.mapId);
+      assert.equal(canStandOnMap(eventObject.mapId, eventObject.approach.x, eventObject.approach.y), true);
+      found.add(eventObject.eventId);
+    }
+  }
+  assert.equal(found.size, 9);
+});
+
+test('completed league work waits for the incident before opening the match target', () => {
   let season = beginSeason(createSeasonState());
   season = recordSeasonAction(season, 'train-attack');
   season = recordSeasonAction(season, 'shop-day');
   season = upgradeSeasonProject(season, 'stands');
-  const objects = ['training', 'stadium'].flatMap(mapId => getSeasonWorldObjects(mapId, season));
+  let objects = ['training', 'stadium'].flatMap(mapId => getSeasonWorldObjects(mapId, season));
   assert.equal(objects.some(item => item.actionId === 'train-attack'), false);
   assert.equal(objects.some(item => item.actionId === 'shop-day'), false);
   assert.equal(objects.some(item => item.projectId === 'stands'), false);
+  assert.equal(objects.some(item => item.kind === 'season-match'), false);
+  assert.deepEqual(objects.filter(item => item.kind === 'season-event').map(item => item.mapId), ['training']);
+  season = resolveSeasonEvent(season, 'shared-pitch', 'share-half');
+  objects = ['training', 'stadium'].flatMap(mapId => getSeasonWorldObjects(mapId, season));
+  assert.equal(objects.some(item => item.kind === 'season-event'), false);
   assert.deepEqual(objects.filter(item => item.kind === 'season-match').map(item => item.mapId), ['stadium']);
 });
 
