@@ -7,7 +7,7 @@
   <meta name="theme-color" content="#14221b">
   <title>海风球场：安若童的联赛生活</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="./styles.css?v=6">
+  <link rel="stylesheet" href="./styles.css?v=7">
 </head>
 <body>
   <main class="game" data-phase="morning">
@@ -255,6 +255,14 @@
         </div>
         <button data-season-conversation-close type="button" aria-label="结束谈话">回到球场</button>
         <p data-season-npc-copy></p>
+        <div class="season-memory" data-season-memory hidden>
+          <div class="season-memory-copy">
+            <span data-season-memory-source>回应刚刚的决定</span>
+            <strong data-season-memory-choice>把半块场地画出来</strong>
+            <small data-season-memory-status>不占本轮经营行动，关系 +1</small>
+          </div>
+          <button data-season-memory-talk type="button">把这件事谈清楚</button>
+        </div>
         <div class="season-response-options" data-season-response-options></div>
       </section>
 
@@ -412,6 +420,6 @@
       </section>
     </section>
   </main>
-  <script type="module" src="./game.js?v=6"></script>
+  <script type="module" src="./game.js?v=7"></script>
 </body>
 </html>

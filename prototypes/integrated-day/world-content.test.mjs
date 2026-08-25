@@ -164,3 +164,16 @@ test('all six recurring NPCs are available during every league round with respon
     assert.equal(schedule.every(npc => npc.seasonNpc && npc.responses.length === 3), true);
   }
 });
+
+test('affected league NPCs bring the latest incident into their field dialogue', () => {
+  let season = beginSeason(createSeasonState());
+  season = resolveSeasonEvent(season, 'shared-pitch', 'share-half');
+  const schedule = getNpcSchedule(17, 'morning', { season });
+  const xiaoman = schedule.find(npc => npc.id === 'xiaoman');
+  const director = schedule.find(npc => npc.id === 'director-luo');
+  assert.equal(xiaoman.memory.timing, 'current');
+  assert.equal(xiaoman.memory.choiceLabel, '把半块场地画出来');
+  assert.equal(xiaoman.copy, '孩子们问下周还能不能用那道白线。我告诉他们，约好的时段不会只算一次。');
+  assert.equal(director.memory, null);
+  assert.equal(director.copy, '评审看的是连续经营，不是某一个周日的热闹。');
+});

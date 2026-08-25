@@ -1584,6 +1584,47 @@ kbd {
   font-size: 9px;
 }
 .season-conversation > p { margin: 13px 0 16px; padding: 13px 14px; border-left: 3px solid #c95f4d; background: rgb(255 255 255 / 36%); font-size: 14px; line-height: 1.7; }
+.season-memory {
+  margin: -5px 0 14px;
+  padding: 11px 12px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid #b96a59;
+  border-radius: 9px;
+  background: #f1ded4;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 58%);
+}
+.season-memory-copy span,
+.season-memory-copy strong,
+.season-memory-copy small { display: block; }
+.season-memory-copy span { color: #a54c3f; font-size: 9px; font-weight: 900; }
+.season-memory-copy strong { margin: 3px 0; color: #243c42; font-size: 12px; }
+.season-memory-copy small { color: #5b6e70; font-size: 9px; line-height: 1.5; }
+.season-memory > button {
+  min-width: 118px;
+  padding: 9px 11px;
+  border: 1px solid #7e3f36;
+  border-bottom-width: 3px;
+  border-radius: 8px;
+  background: #ca6956;
+  color: #142f36;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+.season-memory > button:hover,
+.season-memory > button:focus-visible { background: #dc7965; outline: 2px solid #f8ede5; outline-offset: 2px; }
+.season-memory > button:active { transform: translateY(1px); }
+.season-memory > button:disabled {
+  border-color: #829498;
+  background: #c5d1d1;
+  color: #586d72;
+  cursor: default;
+  transform: none;
+}
 .season-response-options { display: grid; gap: 8px; }
 .season-response-options button {
   padding: 11px 13px;
@@ -2062,6 +2103,8 @@ kbd {
   .season-summary { width: calc(100vw - 18px); max-height: calc(100dvh - 18px); padding: 16px; }
   .season-conversation-person { padding-right: 72px; }
   .season-conversation-person > .npc-sprite { height: 96px; background-size: 600% 100%; }
+  .season-memory { grid-template-columns: 1fr; gap: 9px; }
+  .season-memory > button { width: 100%; }
   .season-response-options button { grid-template-columns: 1fr; gap: 3px; }
   .season-event-person { grid-template-columns: 50px 1fr; gap: 8px; }
   .season-event-person > .npc-sprite { width: 42px; height: 94px; }

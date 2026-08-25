@@ -44,6 +44,7 @@ import {
   beginLeagueSeason,
   chooseSeasonAction,
   chooseSeasonEventDecision,
+  chooseSeasonNpcMemory,
   chooseSeasonNpcResponse,
   buildSeasonProject,
   startLeagueMatch,
@@ -1333,6 +1334,20 @@ function renderSeasonConversation() {
   document.querySelector('[data-season-npc-name]').textContent = npc.name;
   document.querySelector('[data-season-npc-bond]').textContent = `关系 ${state.season.relationships[activeSeasonNpcId]} / 5`;
   document.querySelector('[data-season-npc-copy]').textContent = scheduled?.copy ?? npc.copies[state.season.roundIndex % npc.copies.length];
+  const memoryPanel = document.querySelector('[data-season-memory]');
+  const memory = scheduled?.memory ?? null;
+  const memoryDone = state.season.week.memoryNpcIds.includes(activeSeasonNpcId);
+  memoryPanel.hidden = !memory;
+  if (memory) {
+    document.querySelector('[data-season-memory-source]').textContent = memory.label;
+    document.querySelector('[data-season-memory-choice]').textContent = memory.choiceLabel;
+    document.querySelector('[data-season-memory-status]').textContent = memoryDone
+      ? '你们已经把这件事谈清楚了，关系已经改变。'
+      : '花 6 分钟，不占本轮经营行动，关系 +1。';
+    const memoryButton = document.querySelector('[data-season-memory-talk]');
+    memoryButton.disabled = memoryDone;
+    memoryButton.textContent = memoryDone ? '本轮已谈清楚' : '把这件事谈清楚';
+  }
   document.querySelector('[data-season-response-options]').innerHTML = alreadyTalked
     ? '<p class="season-talked-note">这轮已经认真谈过。下一轮，他会记得你这次怎么回答。</p>'
     : npc.responses.map(response => (
@@ -2499,6 +2514,17 @@ document.querySelector('[data-season-response-options]').addEventListener('click
   const previous = state;
   state = chooseSeasonNpcResponse(state, activeSeasonNpcId, button.dataset.seasonResponse);
   if (state !== previous) {
+    showToast(state.journal.at(-1)?.text);
+    persist();
+  }
+  render();
+});
+
+document.querySelector('[data-season-memory-talk]').addEventListener('click', () => {
+  if (!activeSeasonNpcId) return;
+  const previous = state;
+  state = chooseSeasonNpcMemory(state, activeSeasonNpcId);
+  if (state !== previous && state.season.week.memoryNpcIds.includes(activeSeasonNpcId)) {
     showToast(state.journal.at(-1)?.text);
     persist();
   }

@@ -691,6 +691,35 @@ async function testThreeDayLoop() {
   assert((await text('[data-season-incident-status]')).includes('已回应'), 'The league docket did not remember the incident');
   assert(!await evaluate('document.querySelector("[data-season-event-result]").hidden'), 'The incident consequence was not shown');
   await click('[data-season-event-close]');
+
+  await walkAndWait('npc-xiaoman', '!document.querySelector("[data-season-conversation]").hidden');
+  assert((await text('[data-season-npc-copy]')).includes('那道白线'), 'Xiaoman did not react to the shared-pitch decision');
+  assert((await text('[data-season-memory-source]')).includes('回应刚刚的决定'), 'The incident reaction has no current-decision source');
+  assert((await text('[data-season-memory-choice]')) === '把半块场地画出来', 'The NPC remembered the wrong incident choice');
+  assert(!await evaluate('document.querySelector("[data-season-memory]").hidden'), 'The incident follow-up action is missing');
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 2,
+    mobile: true
+  });
+  await sleep(250);
+  assert(!await evaluate('document.documentElement.scrollWidth > innerWidth'), 'The NPC memory conversation overflows on mobile');
+  await assertInsideViewport('[data-season-conversation]');
+  await capture('league-npc-memory-mobile');
+  await click('[data-season-memory-talk]');
+  assert(await evaluate('window.__integratedDayDebug.getState().season.relationships.xiaoman === 2'), 'The incident follow-up did not strengthen Xiaoman bond');
+  assert(await evaluate('window.__integratedDayDebug.getState().season.week.actions.length === 3'), 'The incident follow-up incorrectly spent a weekly action');
+  assert(await evaluate('window.__integratedDayDebug.getState().season.week.memoryNpcIds.includes("xiaoman")'), 'The incident follow-up was not saved');
+  assert((await text('[data-season-memory-talk]')) === '本轮已谈清楚', 'The incident follow-up did not enter its completed state');
+  await click('[data-season-conversation-close]');
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 1440,
+    height: 900,
+    deviceScaleFactor: 1,
+    mobile: false
+  });
+
   await click('[data-season-board-open]');
   assert(await evaluate('document.querySelectorAll(".season-history > div").length === 1'), 'The season handbook did not record the incident');
   await click('[data-season-board-close]');
@@ -715,6 +744,12 @@ async function testThreeDayLoop() {
   await waitFor('window.__integratedDayDebug.getState().season.roundIndex === 1', 'The second league round did not open');
   assert(await evaluate('window.__integratedDayDebug.getState().season.projects.stands === 1'), 'Construction did not persist into the next round');
   assert(await evaluate('window.__integratedDayDebug.getState().season.relationships["lin-chuan"] === 1'), 'NPC bonds did not persist into the next round');
+  assert(await evaluate('window.__integratedDayDebug.getState().season.relationships.xiaoman === 2'), 'The incident follow-up bond did not persist into the next round');
+  await walkAndWait('to-training', 'window.__integratedDayDebug.getMapId() === "training"');
+  await walkAndWait('npc-xiaoman', '!document.querySelector("[data-season-conversation]").hidden');
+  assert((await text('[data-season-memory-source]')).includes('还记得第 1 轮'), 'The previous incident disappeared before the next decision');
+  assert((await text('[data-season-npc-copy]')).includes('那道白线'), 'Xiaoman forgot the previous incident in the next round');
+  await click('[data-season-conversation-close]');
 }
 
 let exitCode = 0;
@@ -739,7 +774,7 @@ try {
   console.log('PASS three active promise activities');
   console.log('PASS deterministic callback match and character settlement');
   console.log('PASS naming-rights week, free-time loop, public vote, and sign reveal');
-  console.log('PASS repeatable league round, authored incident, NPC bond, construction, match, and standings');
+  console.log('PASS repeatable league round, authored incident, remembered NPC response, construction, match, and standings');
   assert(pageErrors.length === 0, `Browser errors: ${pageErrors.join(' | ')}`);
   console.log('PASS browser console');
 } catch (error) {

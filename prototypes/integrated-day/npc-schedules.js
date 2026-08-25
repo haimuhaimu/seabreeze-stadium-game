@@ -1,5 +1,6 @@
 import { getOpponent } from './opponent-content.js';
 import { SEASON_NPCS } from './season-content.js';
+import { getSeasonNpcMemory } from './season-memory.js';
 
 function npc(id, name, spriteClass, mapId, x, y, copy, options = {}) {
   return Object.freeze({ id, name, spriteClass, mapId, x, y, copy, optional: true, ...options });
@@ -111,6 +112,7 @@ function seasonSchedule(season) {
   if (!season?.active || season.seasonComplete || season.week?.roundComplete) return [];
   return Object.values(SEASON_NPCS).map(person => {
     const position = SEASON_POSITIONS[person.id];
+    const memory = getSeasonNpcMemory(season, person.id);
     return {
       id: person.id,
       name: person.name,
@@ -118,7 +120,8 @@ function seasonSchedule(season) {
       mapId: person.mapId,
       x: position.x,
       y: position.y,
-      copy: person.copies[season.roundIndex % person.copies.length],
+      copy: memory?.copy ?? person.copies[season.roundIndex % person.copies.length],
+      memory,
       responses: person.responses.map(response => ({ ...response })),
       seasonNpc: true,
       optional: true
