@@ -1,4 +1,5 @@
 import { getOpponent } from './opponent-content.js';
+import { SEASON_NPCS } from './season-content.js';
 
 function npc(id, name, spriteClass, mapId, x, y, copy, options = {}) {
   return Object.freeze({ id, name, spriteClass, mapId, x, y, copy, optional: true, ...options });
@@ -97,8 +98,37 @@ function promiseAwareCopy(npc, episode) {
   return npc.copy;
 }
 
+const SEASON_POSITIONS = Object.freeze({
+  'coach-guo': Object.freeze({ x: 55, y: 55 }),
+  'lin-chuan': Object.freeze({ x: 43, y: 66 }),
+  'aunt-xu': Object.freeze({ x: 82, y: 51 }),
+  xiaoman: Object.freeze({ x: 59, y: 63 }),
+  'shen-qiao': Object.freeze({ x: 75, y: 65 }),
+  'director-luo': Object.freeze({ x: 68, y: 66 })
+});
+
+function seasonSchedule(season) {
+  if (!season?.active || season.seasonComplete || season.week?.roundComplete) return [];
+  return Object.values(SEASON_NPCS).map(person => {
+    const position = SEASON_POSITIONS[person.id];
+    return {
+      id: person.id,
+      name: person.name,
+      spriteClass: person.spriteClass,
+      mapId: person.mapId,
+      x: position.x,
+      y: position.y,
+      copy: person.copies[season.roundIndex % person.copies.length],
+      responses: person.responses.map(response => ({ ...response })),
+      seasonNpc: true,
+      optional: true
+    };
+  });
+}
+
 export function getNpcSchedule(dayIndex, phase = 'morning', context = {}) {
   if (phase !== 'morning') return [];
+  if (dayIndex >= 17 && context.season?.active) return seasonSchedule(context.season);
   return (firstWeek[dayIndex] ?? secondWeek[dayIndex] ?? []).map(item => {
     const copy = promiseAwareCopy(item, context.episode);
     if (!item.dynamicOpponent || !context.opponentId) return { ...item, copy };

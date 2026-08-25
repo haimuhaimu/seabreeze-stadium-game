@@ -264,7 +264,7 @@ async function testThreeDayLoop() {
     continueHidden: document.querySelector('[data-continue]').hidden
   })`);
   assert(launch.visible, 'A fresh profile does not show the new launch screen');
-  assert(launch.title.includes('两个星期'), 'The launch screen does not make both story weeks visible');
+  assert(launch.title.includes('不会轻易倒下'), 'The launch screen does not introduce the complete stadium goal');
   assert(launch.directLabel === '直接进入春 15 日', 'The direct story-week entry is missing');
   assert(launch.previewLoaded, 'The main stadium preview did not load');
   assert(launch.continueHidden, 'A fresh profile should not offer an absent save');
@@ -621,6 +621,67 @@ async function testThreeDayLoop() {
   assert((await text('[data-final-authority]')).includes('五把椅子'), 'The final sign does not preserve the voted authority');
   assert((await text('[data-week-next-crisis]')).includes('强队邀请费'), 'The continuation hook is missing');
   await capture('naming-final');
+
+  await click('[data-begin-season]');
+  await waitFor('window.__integratedDayDebug.getState().season.active && window.__integratedDayDebug.getState().dayIndex === 17', 'The Haifeng league did not begin');
+  assert(!await evaluate('document.querySelector("[data-season-docket]").hidden'), 'The persistent league docket is missing');
+  assert((await text('[data-season-actions]')) === '行动 0 / 3', 'The first league round does not start with three open actions');
+
+  await walkAndWait('npc-lin-chuan', '!document.querySelector("[data-season-conversation]").hidden');
+  assert((await text('[data-season-npc-name]')) === '林川', 'The recurring NPC conversation opened the wrong person');
+  await click('[data-season-response="solve"]');
+  assert(await evaluate('window.__integratedDayDebug.getState().season.relationships["lin-chuan"] === 1'), 'The NPC response did not create a persistent bond');
+  await click('[data-season-conversation-close]');
+
+  await click('[data-season-board-open]');
+  await assertInsideViewport('[data-season-board]');
+  assert(await evaluate('document.querySelectorAll(".season-standing-row").length === 8'), 'The league board does not show all eight teams');
+  assert(await evaluate('document.querySelectorAll(".season-projects > div").length === 5'), 'The construction board does not show all five projects');
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 2,
+    mobile: true
+  });
+  await sleep(250);
+  assert(!await evaluate('document.documentElement.scrollWidth > innerWidth'), 'The league board overflows on mobile');
+  await assertInsideViewport('[data-season-board]');
+  await capture('league-board-mobile');
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 1440,
+    height: 900,
+    deviceScaleFactor: 1,
+    mobile: false
+  });
+  await click('[data-season-board-close]');
+
+  await walkAndWait('season-action-attack', '!document.querySelector("[data-decision-panel]").hidden');
+  await click('[data-decision-choice="train-attack"]');
+  await walkAndWait('season-action-community', '!document.querySelector("[data-decision-panel]").hidden');
+  await click('[data-decision-choice="community-open"]');
+  await walkAndWait('season-project-stands', '!document.querySelector("[data-decision-panel]").hidden');
+  await click('[data-decision-choice="stands"]');
+  assert(await evaluate('window.__integratedDayDebug.getState().season.projects.stands === 1'), 'The first permanent stand upgrade was not built');
+  assert((await text('[data-season-actions]')) === '行动 3 / 3', 'The weekly action counter did not fill');
+
+  await walkAndWait('season-match-center', '!document.querySelector("[data-match-panel]").hidden');
+  await click('[data-highlight-choice="use-attack-work"]');
+  const secondMoment = await evaluate(`({
+    choices: [...document.querySelectorAll('[data-highlight-choice]')].map(button => button.dataset.highlightChoice),
+    match: window.__integratedDayDebug.getState().season.match,
+    panelHidden: document.querySelector('[data-match-panel]').hidden
+  })`);
+  assert(secondMoment.choices.includes('open-safe-stands'), `The second league moment did not render: ${JSON.stringify(secondMoment)}`);
+  await click('[data-highlight-choice="open-safe-stands"]');
+  await click('[data-highlight-choice="share-final-ball"]');
+  await waitFor('window.__integratedDayDebug.getState().season.week.roundComplete', 'The first league match did not settle');
+  await assertInsideViewport('[data-season-summary]');
+  assert((await text('[data-season-summary-rank]')).includes('当前第'), 'The round summary does not show the live rank');
+  await capture('league-round-summary');
+  await click('[data-season-next]');
+  await waitFor('window.__integratedDayDebug.getState().season.roundIndex === 1', 'The second league round did not open');
+  assert(await evaluate('window.__integratedDayDebug.getState().season.projects.stands === 1'), 'Construction did not persist into the next round');
+  assert(await evaluate('window.__integratedDayDebug.getState().season.relationships["lin-chuan"] === 1'), 'NPC bonds did not persist into the next round');
 }
 
 let exitCode = 0;
@@ -645,6 +706,7 @@ try {
   console.log('PASS three active promise activities');
   console.log('PASS deterministic callback match and character settlement');
   console.log('PASS naming-rights week, free-time loop, public vote, and sign reveal');
+  console.log('PASS repeatable league round, NPC bond, construction, match, and standings');
   assert(pageErrors.length === 0, `Browser errors: ${pageErrors.join(' | ')}`);
   console.log('PASS browser console');
 } catch (error) {

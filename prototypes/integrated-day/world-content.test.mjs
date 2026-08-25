@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MAPS, canStandOnMap, getNamingActionObjects } from './world-content.js';
+import { MAPS, canStandOnMap, getNamingActionObjects, getSeasonWorldObjects } from './world-content.js';
 import { getNpcSchedule } from './npc-schedules.js';
+import { beginSeason, createSeasonState, recordSeasonAction, upgradeSeasonProject } from './season-state.js';
 
 test('training and stadium maps have reciprocal exits and safe spawn points', () => {
   assert.equal(MAPS.training.exits[0].targetMap, 'stadium');
@@ -95,4 +96,45 @@ test('the second week lets every central character take a position on the name',
   const plaqueDay = getNpcSchedule(13);
   assert.match(plaqueDay.find(npc => npc.id === 'coach-guo').copy, /没拦|刮掉|对不起/);
   assert.match(plaqueDay.find(npc => npc.id === 'shen-qiao').copy, /创办|名字|欠/);
+});
+
+test('the league places seven weekly actions and five construction sites in the physical world', () => {
+  const season = beginSeason(createSeasonState());
+  const objects = ['training', 'stadium'].flatMap(mapId => getSeasonWorldObjects(mapId, season));
+  assert.equal(objects.filter(item => item.kind === 'season-action').length, 7);
+  assert.equal(objects.filter(item => item.kind === 'season-project').length, 5);
+  for (const object of objects) {
+    assert.equal(canStandOnMap(object.mapId, object.approach.x, object.approach.y), true, object.id);
+    const map = MAPS[object.mapId];
+    const interactionDistance = Math.hypot(
+      (object.x - object.approach.x) * map.width / 100,
+      (object.y - object.approach.y) * map.height / 100
+    );
+    assert.ok(interactionDistance <= 112, `${object.id} stops too far away to interact`);
+    for (const point of object.route) assert.equal(canStandOnMap(object.mapId, point.x, point.y), true, object.id);
+  }
+});
+
+test('completed league work leaves the map and the match target opens after three actions', () => {
+  let season = beginSeason(createSeasonState());
+  season = recordSeasonAction(season, 'train-attack');
+  season = recordSeasonAction(season, 'shop-day');
+  season = upgradeSeasonProject(season, 'stands');
+  const objects = ['training', 'stadium'].flatMap(mapId => getSeasonWorldObjects(mapId, season));
+  assert.equal(objects.some(item => item.actionId === 'train-attack'), false);
+  assert.equal(objects.some(item => item.actionId === 'shop-day'), false);
+  assert.equal(objects.some(item => item.projectId === 'stands'), false);
+  assert.deepEqual(objects.filter(item => item.kind === 'season-match').map(item => item.mapId), ['stadium']);
+});
+
+test('all six recurring NPCs are available during every league round with response choices', () => {
+  const season = beginSeason(createSeasonState());
+  for (let roundIndex = 0; roundIndex < 7; roundIndex += 1) {
+    season.roundIndex = roundIndex;
+    const schedule = getNpcSchedule(17 + roundIndex, 'morning', { season });
+    assert.deepEqual(schedule.map(npc => npc.id).sort(), [
+      'aunt-xu', 'coach-guo', 'director-luo', 'lin-chuan', 'shen-qiao', 'xiaoman'
+    ]);
+    assert.equal(schedule.every(npc => npc.seasonNpc && npc.responses.length === 3), true);
+  }
 });

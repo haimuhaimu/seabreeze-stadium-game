@@ -149,6 +149,108 @@ const NAMING_ACTION_OBJECTS = Object.freeze([
   })
 ]);
 
+const SEASON_ACTION_OBJECTS = Object.freeze([
+  Object.freeze({
+    id: 'season-action-attack', actionId: 'train-attack', mapId: 'stadium', x: 52, y: 48,
+    approach: Object.freeze({ x: 52, y: 59 }),
+    route: Object.freeze([Object.freeze({ x: 84, y: 88 }), Object.freeze({ x: 84, y: 68 }), Object.freeze({ x: 62, y: 68 })]),
+    kind: 'season-action', label: '去主赛场练前场配合'
+  }),
+  Object.freeze({
+    id: 'season-action-defense', actionId: 'train-defense', mapId: 'training', x: 55, y: 55,
+    approach: Object.freeze({ x: 55, y: 64 }), route: Object.freeze([]),
+    kind: 'season-action', label: '在旧训练场练整体站位'
+  }),
+  Object.freeze({
+    id: 'season-action-youth', actionId: 'youth-session', mapId: 'training', x: 61, y: 63,
+    approach: Object.freeze({ x: 61, y: 71 }), route: Object.freeze([]),
+    kind: 'season-action', label: '让年轻人加入合练'
+  }),
+  Object.freeze({
+    id: 'season-action-shop', actionId: 'shop-day', mapId: 'training', x: 82, y: 32,
+    approach: Object.freeze({ x: 82, y: 42 }), route: Object.freeze([]),
+    kind: 'season-action', label: '认真开一天场边小店'
+  }),
+  Object.freeze({
+    id: 'season-action-community', actionId: 'community-open', mapId: 'stadium', x: 7, y: 30,
+    approach: Object.freeze({ x: 4, y: 40 }),
+    route: Object.freeze([Object.freeze({ x: 30, y: 68 }), Object.freeze({ x: 4, y: 68 })]),
+    kind: 'season-action', label: '在主场入口开放社区时段'
+  }),
+  Object.freeze({
+    id: 'season-action-maintenance', actionId: 'maintenance', mapId: 'stadium', x: 72, y: 64,
+    approach: Object.freeze({ x: 76, y: 68 }),
+    route: Object.freeze([Object.freeze({ x: 84, y: 88 }), Object.freeze({ x: 84, y: 68 })]),
+    kind: 'season-action', label: '巡检灯架、看台和排水口'
+  }),
+  Object.freeze({
+    id: 'season-action-rest', actionId: 'rest', mapId: 'stadium', x: 86, y: 87,
+    approach: Object.freeze({ x: 84, y: 88 }), route: Object.freeze([]),
+    kind: 'season-action', label: '在海边长椅上早点休息'
+  })
+]);
+
+const SEASON_PROJECT_OBJECTS = Object.freeze([
+  Object.freeze({
+    id: 'season-project-stands', projectId: 'stands', mapId: 'stadium', x: 25, y: 64,
+    approach: Object.freeze({ x: 28, y: 68 }), route: Object.freeze([Object.freeze({ x: 4, y: 68 })]),
+    kind: 'season-project', label: '查看主看台加固工程'
+  }),
+  Object.freeze({
+    id: 'season-project-clinic', projectId: 'clinic', mapId: 'stadium', x: 70, y: 65,
+    approach: Object.freeze({ x: 67, y: 68 }), route: Object.freeze([Object.freeze({ x: 84, y: 68 })]),
+    kind: 'season-project', label: '查看理疗室建设'
+  }),
+  Object.freeze({
+    id: 'season-project-academy', projectId: 'academy', mapId: 'training', x: 62, y: 78,
+    approach: Object.freeze({ x: 60, y: 82 }), route: Object.freeze([]),
+    kind: 'season-project', label: '查看青训角扩建'
+  }),
+  Object.freeze({
+    id: 'season-project-market', projectId: 'market', mapId: 'stadium', x: 83, y: 64,
+    approach: Object.freeze({ x: 84, y: 68 }),
+    route: Object.freeze([Object.freeze({ x: 84, y: 88 }), Object.freeze({ x: 84, y: 68 })]),
+    kind: 'season-project', label: '查看海风集市扩建'
+  }),
+  Object.freeze({
+    id: 'season-project-lights', projectId: 'lights', mapId: 'stadium', x: 92, y: 64,
+    approach: Object.freeze({ x: 89, y: 68 }),
+    route: Object.freeze([Object.freeze({ x: 84, y: 88 }), Object.freeze({ x: 84, y: 68 })]),
+    kind: 'season-project', label: '查看灯光与直播位升级'
+  })
+]);
+
+const SEASON_MATCH_OBJECT = Object.freeze({
+  id: 'season-match-center', mapId: 'stadium', x: 52, y: 48,
+  approach: Object.freeze({ x: 52, y: 59 }),
+  route: Object.freeze([Object.freeze({ x: 84, y: 88 }), Object.freeze({ x: 84, y: 68 }), Object.freeze({ x: 62, y: 68 })]),
+  kind: 'season-match', label: '进入本轮联赛'
+});
+
+function cloneWorldObject(object) {
+  return {
+    ...object,
+    approach: { ...object.approach },
+    route: object.route.map(point => ({ ...point }))
+  };
+}
+
+export function getSeasonWorldObjects(mapId, season) {
+  getMap(mapId);
+  if (!season?.active || season.seasonComplete || season.week?.roundComplete || season.match) return [];
+  if (season.week.actions.length === 3) {
+    return mapId === 'stadium' ? [cloneWorldObject(SEASON_MATCH_OBJECT)] : [];
+  }
+  const completed = new Set(season.week.actions);
+  const actions = SEASON_ACTION_OBJECTS.filter(object => object.mapId === mapId && !completed.has(object.actionId));
+  const projects = SEASON_PROJECT_OBJECTS.filter(object => (
+    object.mapId === mapId
+    && season.projects[object.projectId] < 3
+    && !completed.has(`build:${object.projectId}`)
+  ));
+  return [...actions, ...projects].map(cloneWorldObject);
+}
+
 export function getNamingActionObjects(mapId, dayIndex, namingRights) {
   if (mapId !== 'stadium' || !namingRights?.freeTime?.available || namingRights.freeTime.activeAction) return [];
   if (namingRights.freeTime.records.some(record => record.dayIndex === dayIndex)) return [];
