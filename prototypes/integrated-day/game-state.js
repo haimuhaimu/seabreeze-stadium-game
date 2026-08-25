@@ -49,6 +49,7 @@ import {
   getProjectUpgrade,
   recordSeasonAction,
   recordSeasonNpcTalk,
+  resolveSeasonEvent,
   resolveSeasonMatchMoment,
   settleSeasonRound,
   startNextSeason,
@@ -62,6 +63,7 @@ import {
   getSeasonProject,
   getSeasonRound
 } from './season-content.js';
+import { getSeasonEventChoice } from './season-events.js';
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -1207,6 +1209,47 @@ export function chooseSeasonNpcResponse(state, npcId, responseId) {
   return next;
 }
 
+export function chooseSeasonEventDecision(state, eventId, choiceId) {
+  if (!validLeagueState(state)) return addJournal(state, 'quiet', '现在没有需要回应的联赛事件。');
+  let season;
+  let choice;
+  try {
+    season = resolveSeasonEvent(state.season, eventId, choiceId);
+    choice = getSeasonEventChoice(eventId, choiceId);
+  } catch (error) {
+    return addJournal(state, 'quiet', error.message.includes('already resolved')
+      ? '这轮发生的事已经作出了决定。'
+      : '这不是本轮需要回应的事情。');
+  }
+
+  const next = copyState(state);
+  next.season = season;
+  const effects = choice.effects;
+  if (effects.cash) {
+    next.economy = postLedgerEntry(next.economy, {
+      id: `season-event-${next.season.seasonNumber}-${next.season.roundIndex + 1}-${eventId}`,
+      label: choice.label,
+      amount: effects.cash
+    });
+  }
+  next.roster.attack = clamp(next.roster.attack + effects.attack, 0, 100);
+  next.roster.defense = clamp(next.roster.defense + effects.defense, 0, 100);
+  next.roster.cohesion = clamp(next.roster.cohesion + effects.cohesion, 0, 100);
+  next.communitySupport = clamp(next.communitySupport + effects.community, 0, 100);
+  next.facilities.condition = clamp(next.facilities.condition + effects.facility, 0, 100);
+  next.energy = clamp(next.energy + effects.energy, 0, 100);
+  if (effects.support || effects.shenInfluence) {
+    next.governance = applyGovernanceEffect(next.governance, {
+      support: effects.support,
+      shenInfluence: effects.shenInfluence
+    });
+  }
+  next.minute += 20;
+  syncManagementCash(next);
+  appendManagementJournal(next, 'season-event', choice.resultCopy);
+  return next;
+}
+
 export function buildSeasonProject(state, projectId) {
   if (!validLeagueState(state)) return addJournal(state, 'quiet', '现在不能开始这项建设。');
   let upgrade;
@@ -1242,6 +1285,12 @@ export function buildSeasonProject(state, projectId) {
 
 export function startLeagueMatch(state) {
   if (!validLeagueState(state)) return addJournal(state, 'quiet', '本轮比赛还没有到开场时间。');
+  if (state.season.week.actions.length < 3) {
+    return addJournal(state, 'quiet', '先完成本轮三项经营行动，再进入周末比赛。');
+  }
+  if (!state.season.week.eventChoiceId) {
+    return addJournal(state, 'quiet', '先回应本轮发生的事，再进入周末比赛。');
+  }
   let season;
   try {
     season = startSeasonMatch(state.season, {
@@ -1252,7 +1301,7 @@ export function startLeagueMatch(state) {
       cash: state.economy.cash
     });
   } catch {
-    return addJournal(state, 'quiet', '先完成本轮三项经营行动，再进入周末比赛。');
+    return addJournal(state, 'quiet', '本轮比赛还没有准备好。');
   }
   const next = copyState(state);
   next.season = season;

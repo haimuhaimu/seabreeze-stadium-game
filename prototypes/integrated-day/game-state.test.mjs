@@ -32,6 +32,7 @@ import {
   startSecondWeeklyMatch,
   resolveSecondWeeklyMatchChoice,
   beginLeagueSeason,
+  chooseSeasonEventDecision,
   chooseSeasonAction,
   chooseSeasonNpcResponse,
   buildSeasonProject,
@@ -404,12 +405,27 @@ test('season actions, NPC responses, and construction update shared progress onc
   assert.ok(state.economy.cash < cashBefore + 34);
 });
 
+test('a league incident changes shared progress and relationships without spending work', () => {
+  const before = beginLeagueSeason(completedNamingWeek());
+  const after = chooseSeasonEventDecision(before, 'shared-pitch', 'share-half');
+  assert.equal(after.season.week.actions.length, 0);
+  assert.equal(after.season.week.eventChoiceId, 'share-half');
+  assert.equal(after.season.relationships.xiaoman, before.season.relationships.xiaoman + 1);
+  assert.equal(after.communitySupport, before.communitySupport + 4);
+  assert.equal(after.roster.cohesion, before.roster.cohesion + 2);
+  assert.ok(after.season.week.helpTags.includes('community'));
+  const repeated = chooseSeasonEventDecision(after, 'shared-pitch', 'first-team-first');
+  assert.equal(repeated.season.eventHistory.length, 1);
+  assert.equal(repeated.communitySupport, after.communitySupport);
+});
+
 test('league match settlement pays income, updates standings, and opens the next round', () => {
   let state = beginLeagueSeason(completedNamingWeek());
   state = chooseSeasonNpcResponse(state, 'coach-guo', 'solve');
   state = chooseSeasonAction(state, 'train-attack');
   state = chooseSeasonAction(state, 'community-open');
   state = buildSeasonProject(state, 'stands');
+  state = chooseSeasonEventDecision(state, 'shared-pitch', 'share-half');
   const cashBeforeMatch = state.economy.cash;
   state = startLeagueMatch(state);
   for (const choiceId of ['use-attack-work', 'open-safe-stands', 'follow-coach-note']) {
