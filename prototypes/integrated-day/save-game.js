@@ -210,6 +210,10 @@ function validSeason(season) {
     && season.week.npcResponses
     && typeof season.week.npcResponses === 'object'
     && Array.isArray(season.week.helpTags)
+    && (season.week.visitedProjectIds === undefined || (
+      Array.isArray(season.week.visitedProjectIds)
+      && season.week.visitedProjectIds.every(id => SEASON_PROJECT_IDS.includes(id))
+    ))
     && typeof season.week.roundComplete === 'boolean'
     && SEASON_PROJECT_IDS.every(id => Number.isInteger(season.projects?.[id]) && season.projects[id] >= 0 && season.projects[id] <= 3)
     && SEASON_NPC_IDS.every(id => Number.isInteger(season.relationships?.[id]) && season.relationships[id] >= 0 && season.relationships[id] <= 5)

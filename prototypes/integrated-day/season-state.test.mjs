@@ -14,6 +14,7 @@ import {
   recordSeasonAction,
   recordSeasonMemoryTalk,
   recordSeasonNpcTalk,
+  recordSeasonProjectVisit,
   resolveSeasonEvent,
   resolveSeasonMatchMoment,
   settleSeasonRound,
@@ -35,6 +36,7 @@ test('a new season has eight empty standings rows and persistent progression slo
   assert.equal(season.relationships['coach-guo'], 0);
   assert.equal(season.week.eventChoiceId, null);
   assert.deepEqual(season.week.memoryNpcIds, []);
+  assert.deepEqual(season.week.visitedProjectIds, []);
   assert.deepEqual(season.eventHistory, []);
   assert.equal(season.elite.status, 'idle');
   const active = beginSeason(season);
@@ -114,6 +116,7 @@ test('old version five season state normalizes missing incident fields', () => {
   delete legacy.week.eventChoiceId;
   delete legacy.week.eventTag;
   delete legacy.week.memoryNpcIds;
+  delete legacy.week.visitedProjectIds;
   delete legacy.eventHistory;
   delete legacy.elite;
   const normalized = cloneSeasonState(legacy);
@@ -121,8 +124,34 @@ test('old version five season state normalizes missing incident fields', () => {
   assert.equal(normalized.week.eventChoiceId, null);
   assert.equal(normalized.week.eventTag, null);
   assert.deepEqual(normalized.week.memoryNpcIds, []);
+  assert.deepEqual(normalized.week.visitedProjectIds, []);
   assert.deepEqual(normalized.eventHistory, []);
   assert.equal(normalized.elite.status, 'idle');
+});
+
+test('visiting a built facility is free, strengthens its patron, and resets next round', () => {
+  let season = beginSeason(createSeasonState());
+  assert.throws(() => recordSeasonProjectVisit(season, 'stands'), /not built/i);
+  season.projects.stands = 1;
+  const actionsBefore = [...season.week.actions];
+  season = recordSeasonProjectVisit(season, 'stands');
+  assert.deepEqual(season.week.actions, actionsBefore);
+  assert.deepEqual(season.week.visitedProjectIds, ['stands']);
+  assert.equal(season.relationships['lin-chuan'], 1);
+  assert.throws(() => recordSeasonProjectVisit(season, 'stands'), /already visited/i);
+  season.week.roundComplete = true;
+  const nextRound = advanceSeasonRound(season);
+  assert.deepEqual(nextRound.week.visitedProjectIds, []);
+  assert.equal(nextRound.relationships['lin-chuan'], 1);
+});
+
+test('a facility visit never pushes its patron relationship past five', () => {
+  let season = beginSeason(createSeasonState());
+  season.projects.market = 3;
+  season.relationships['aunt-xu'] = 5;
+  season = recordSeasonProjectVisit(season, 'market');
+  assert.equal(season.relationships['aunt-xu'], 5);
+  assert.throws(() => recordSeasonProjectVisit(season, 'missing'), /Unknown construction scene/);
 });
 
 test('construction has three persistent levels and consumes a work action only when upgraded', () => {

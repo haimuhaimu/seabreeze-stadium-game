@@ -53,6 +53,13 @@ test('invalid shapes are rejected and an interrupted training round is closed', 
   assert.equal(loaded.record.state.namingRights.freeTime.activeAction, null);
 });
 
+test('a version five save rejects unknown facility visit ids', () => {
+  const storage = memoryStorage();
+  const state = createGameState();
+  state.season.week.visitedProjectIds = ['missing'];
+  assert.throws(() => writeSave(storage, state, { x: 50, y: 89 }), /Invalid save record/);
+});
+
 test('a valid version one save migrates in memory without overwriting the legacy record', () => {
   const storage = memoryStorage();
   const current = createGameState();
@@ -189,6 +196,7 @@ test('an early version five league save gains incident fields on its next decisi
   delete state.season.week.eventChoiceId;
   delete state.season.week.eventTag;
   delete state.season.week.memoryNpcIds;
+  delete state.season.week.visitedProjectIds;
   delete state.season.eventHistory;
   delete state.season.elite;
   writeSave(storage, state, { x: 52, y: 68 }, 'stadium');
@@ -200,6 +208,7 @@ test('an early version five league save gains incident fields on its next decisi
   assert.equal(remembered.season.projects.stands, 2);
   assert.equal(remembered.season.week.eventChoiceId, 'share-half');
   assert.deepEqual(remembered.season.week.memoryNpcIds, ['xiaoman']);
+  assert.deepEqual(remembered.season.week.visitedProjectIds, []);
   assert.equal(remembered.season.eventHistory.length, 1);
 });
 

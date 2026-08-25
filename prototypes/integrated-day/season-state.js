@@ -11,6 +11,7 @@ import {
 } from './season-content.js';
 import { getSeasonEvent, getSeasonEventChoice } from './season-events.js';
 import { getSeasonNpcMemory } from './season-memory.js';
+import { getConstructionScene } from './construction-content.js';
 import {
   cloneEliteState,
   createEliteState,
@@ -31,6 +32,7 @@ const emptyWeek = () => ({
   npcResponses: {},
   helpTags: [],
   memoryNpcIds: [],
+  visitedProjectIds: [],
   eventId: null,
   eventChoiceId: null,
   eventTag: null,
@@ -80,6 +82,7 @@ export function cloneSeasonState(state) {
       npcResponses: { ...(state.week.npcResponses ?? {}) },
       helpTags: [...(state.week.helpTags ?? [])],
       memoryNpcIds: [...(state.week.memoryNpcIds ?? [])],
+      visitedProjectIds: [...(state.week.visitedProjectIds ?? [])],
       eventId: state.week.eventId ?? null,
       eventChoiceId: state.week.eventChoiceId ?? null,
       eventTag: state.week.eventTag ?? null,
@@ -142,6 +145,17 @@ export function recordSeasonMemoryTalk(state, npcId) {
   const next = cloneSeasonState(state);
   next.week.memoryNpcIds.push(npcId);
   next.relationships[npcId] = clamp(next.relationships[npcId] + 1, 0, 5);
+  return next;
+}
+
+export function recordSeasonProjectVisit(state, projectId) {
+  assertPlayableWeek(state);
+  const scene = getConstructionScene(projectId);
+  if (!state.projects?.[projectId]) throw new Error('Project is not built');
+  if (state.week.visitedProjectIds?.includes(projectId)) throw new Error('Project already visited this round');
+  const next = cloneSeasonState(state);
+  next.week.visitedProjectIds.push(projectId);
+  next.relationships[scene.patronId] = clamp(next.relationships[scene.patronId] + 1, 0, 5);
   return next;
 }
 
