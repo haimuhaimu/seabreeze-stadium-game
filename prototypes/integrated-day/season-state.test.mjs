@@ -11,6 +11,7 @@ import {
   getSeasonMatchMoment,
   getStandings,
   recordSeasonAction,
+  recordSeasonMemoryTalk,
   recordSeasonNpcTalk,
   resolveSeasonEvent,
   resolveSeasonMatchMoment,
@@ -30,6 +31,7 @@ test('a new season has eight empty standings rows and persistent progression slo
   assert.equal(season.projects.stands, 0);
   assert.equal(season.relationships['coach-guo'], 0);
   assert.equal(season.week.eventChoiceId, null);
+  assert.deepEqual(season.week.memoryNpcIds, []);
   assert.deepEqual(season.eventHistory, []);
   const active = beginSeason(season);
   assert.equal(active.active, true);
@@ -82,16 +84,38 @@ test('an incident is free, changes relationships, and is recorded once for later
   assert.throws(() => resolveSeasonEvent(season, 'shared-pitch', 'share-half'), /already resolved/i);
 });
 
+test('an incident follow-up is free, strengthens one affected bond, and happens once per round', () => {
+  let season = beginSeason(createSeasonState());
+  season = resolveSeasonEvent(season, 'shared-pitch', 'share-half');
+  const actionsBefore = [...season.week.actions];
+  season = recordSeasonMemoryTalk(season, 'xiaoman');
+  assert.deepEqual(season.week.actions, actionsBefore);
+  assert.deepEqual(season.week.memoryNpcIds, ['xiaoman']);
+  assert.equal(season.relationships.xiaoman, 2);
+  assert.throws(() => recordSeasonMemoryTalk(season, 'xiaoman'), /already discussed/i);
+  assert.throws(() => recordSeasonMemoryTalk(season, 'director-luo'), /no incident memory/i);
+});
+
+test('an incident follow-up never pushes a relationship past five', () => {
+  let season = beginSeason(createSeasonState());
+  season = resolveSeasonEvent(season, 'shared-pitch', 'share-half');
+  season.relationships.xiaoman = 5;
+  season = recordSeasonMemoryTalk(season, 'xiaoman');
+  assert.equal(season.relationships.xiaoman, 5);
+});
+
 test('old version five season state normalizes missing incident fields', () => {
   const legacy = beginSeason(createSeasonState());
   delete legacy.week.eventId;
   delete legacy.week.eventChoiceId;
   delete legacy.week.eventTag;
+  delete legacy.week.memoryNpcIds;
   delete legacy.eventHistory;
   const normalized = cloneSeasonState(legacy);
   assert.equal(normalized.week.eventId, null);
   assert.equal(normalized.week.eventChoiceId, null);
   assert.equal(normalized.week.eventTag, null);
+  assert.deepEqual(normalized.week.memoryNpcIds, []);
   assert.deepEqual(normalized.eventHistory, []);
 });
 

@@ -10,6 +10,7 @@ import {
   getSeasonRound
 } from './season-content.js';
 import { getSeasonEvent, getSeasonEventChoice } from './season-events.js';
+import { getSeasonNpcMemory } from './season-memory.js';
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const PROJECT_IDS = Object.freeze(Object.keys(SEASON_PROJECTS));
@@ -20,6 +21,7 @@ const emptyWeek = () => ({
   talkedNpcIds: [],
   npcResponses: {},
   helpTags: [],
+  memoryNpcIds: [],
   eventId: null,
   eventChoiceId: null,
   eventTag: null,
@@ -67,6 +69,7 @@ export function cloneSeasonState(state) {
       talkedNpcIds: [...(state.week.talkedNpcIds ?? [])],
       npcResponses: { ...(state.week.npcResponses ?? {}) },
       helpTags: [...(state.week.helpTags ?? [])],
+      memoryNpcIds: [...(state.week.memoryNpcIds ?? [])],
       eventId: state.week.eventId ?? null,
       eventChoiceId: state.week.eventChoiceId ?? null,
       eventTag: state.week.eventTag ?? null,
@@ -118,6 +121,16 @@ export function recordSeasonNpcTalk(state, npcId, responseId) {
   next.week.npcResponses[npcId] = responseId;
   if (!next.week.helpTags.includes(response.help)) next.week.helpTags.push(response.help);
   next.relationships[npcId] = clamp(next.relationships[npcId] + response.bond, 0, 5);
+  return next;
+}
+
+export function recordSeasonMemoryTalk(state, npcId) {
+  assertPlayableWeek(state);
+  if (state.week.memoryNpcIds?.includes(npcId)) throw new Error('NPC memory already discussed this round');
+  if (!getSeasonNpcMemory(state, npcId)) throw new TypeError('NPC has no incident memory');
+  const next = cloneSeasonState(state);
+  next.week.memoryNpcIds.push(npcId);
+  next.relationships[npcId] = clamp(next.relationships[npcId] + 1, 0, 5);
   return next;
 }
 

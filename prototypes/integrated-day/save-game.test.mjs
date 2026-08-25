@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chooseSeasonEventDecision, createGameState } from './game-state.js';
+import { chooseSeasonEventDecision, chooseSeasonNpcMemory, createGameState } from './game-state.js';
 import { createEpisodeState } from './episode-state.js';
 import { SAVE_KEY, V4_SAVE_KEY, V3_SAVE_KEY, V2_SAVE_KEY, LEGACY_SAVE_KEY, loadSave, writeSave, clearSave } from './save-game.js';
 
@@ -186,12 +186,15 @@ test('an early version five league save gains incident fields on its next decisi
   delete state.season.week.eventId;
   delete state.season.week.eventChoiceId;
   delete state.season.week.eventTag;
+  delete state.season.week.memoryNpcIds;
   delete state.season.eventHistory;
   writeSave(storage, state, { x: 52, y: 68 }, 'stadium');
   const loaded = loadSave(storage);
   assert.equal(loaded.ok, true);
   const decided = chooseSeasonEventDecision(loaded.record.state, 'shared-pitch', 'share-half');
-  assert.equal(decided.season.projects.stands, 2);
-  assert.equal(decided.season.week.eventChoiceId, 'share-half');
-  assert.equal(decided.season.eventHistory.length, 1);
+  const remembered = chooseSeasonNpcMemory(decided, 'xiaoman');
+  assert.equal(remembered.season.projects.stands, 2);
+  assert.equal(remembered.season.week.eventChoiceId, 'share-half');
+  assert.deepEqual(remembered.season.week.memoryNpcIds, ['xiaoman']);
+  assert.equal(remembered.season.eventHistory.length, 1);
 });

@@ -48,6 +48,7 @@ import {
   createSeasonState,
   getProjectUpgrade,
   recordSeasonAction,
+  recordSeasonMemoryTalk,
   recordSeasonNpcTalk,
   resolveSeasonEvent,
   resolveSeasonMatchMoment,
@@ -64,6 +65,7 @@ import {
   getSeasonRound
 } from './season-content.js';
 import { getSeasonEventChoice } from './season-events.js';
+import { getSeasonNpcMemory } from './season-memory.js';
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -1206,6 +1208,30 @@ export function chooseSeasonNpcResponse(state, npcId, responseId) {
   next.minute += 12;
   syncManagementCash(next);
   appendManagementJournal(next, 'relationship', `${npc.name}记住了这次回答。关系 ${next.season.relationships[npcId]}/5。`);
+  return next;
+}
+
+export function chooseSeasonNpcMemory(state, npcId) {
+  if (!validLeagueState(state)) return addJournal(state, 'quiet', '今天还没有可以复盘的事情。');
+  let memory;
+  let season;
+  try {
+    memory = getSeasonNpcMemory(state.season, npcId);
+    season = recordSeasonMemoryTalk(state.season, npcId);
+  } catch (error) {
+    return addJournal(state, 'quiet', error.message.includes('already discussed')
+      ? '这轮已经和这个人把这件事谈清楚了。'
+      : '这个人现在没有想和你复盘的决定。');
+  }
+  const next = copyState(state);
+  next.season = season;
+  next.minute += 6;
+  const npc = getSeasonNpc(npcId);
+  appendManagementJournal(
+    next,
+    'season-memory',
+    `${npc.name}还记得“${memory.choiceLabel}”。${memory.copy}`
+  );
   return next;
 }
 

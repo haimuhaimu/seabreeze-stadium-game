@@ -33,6 +33,7 @@ import {
   resolveSecondWeeklyMatchChoice,
   beginLeagueSeason,
   chooseSeasonEventDecision,
+  chooseSeasonNpcMemory,
   chooseSeasonAction,
   chooseSeasonNpcResponse,
   buildSeasonProject,
@@ -417,6 +418,23 @@ test('a league incident changes shared progress and relationships without spendi
   const repeated = chooseSeasonEventDecision(after, 'shared-pitch', 'first-team-first');
   assert.equal(repeated.season.eventHistory.length, 1);
   assert.equal(repeated.communitySupport, after.communitySupport);
+});
+
+test('talking through an incident memory takes six minutes but no work action', () => {
+  const started = beginLeagueSeason(completedNamingWeek());
+  const eventState = chooseSeasonEventDecision(started, 'shared-pitch', 'share-half');
+  const beforeMinute = eventState.minute;
+  const beforeBond = eventState.season.relationships.xiaoman;
+  const after = chooseSeasonNpcMemory(eventState, 'xiaoman');
+  assert.equal(after.minute, beforeMinute + 6);
+  assert.deepEqual(after.season.week.actions, eventState.season.week.actions);
+  assert.deepEqual(after.season.week.memoryNpcIds, ['xiaoman']);
+  assert.equal(after.season.relationships.xiaoman, beforeBond + 1);
+  assert.equal(after.journal.at(-1).kind, 'season-memory');
+  assert.match(after.journal.at(-1).text, /小满.*把半块场地画出来/);
+  const repeated = chooseSeasonNpcMemory(after, 'xiaoman');
+  assert.deepEqual(repeated.season.week.memoryNpcIds, ['xiaoman']);
+  assert.equal(repeated.season.relationships.xiaoman, after.season.relationships.xiaoman);
 });
 
 test('league match settlement pays income, updates standings, and opens the next round', () => {
