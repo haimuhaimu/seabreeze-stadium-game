@@ -11,6 +11,15 @@ import {
 } from './season-content.js';
 import { getSeasonEvent, getSeasonEventChoice } from './season-events.js';
 import { getSeasonNpcMemory } from './season-memory.js';
+import {
+  cloneEliteState,
+  createEliteState,
+  declineEliteInvitation,
+  getEliteMatchMoment,
+  offerEliteInvitation,
+  resolveEliteMatchMoment,
+  startEliteMatch
+} from './elite-state.js';
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const PROJECT_IDS = Object.freeze(Object.keys(SEASON_PROJECTS));
@@ -56,7 +65,8 @@ export function createSeasonState() {
     eventHistory: [],
     goals: null,
     seasonComplete: false,
-    eliteQualified: false
+    eliteQualified: false,
+    elite: createEliteState()
   };
 }
 
@@ -86,7 +96,8 @@ export function cloneSeasonState(state) {
     } : null,
     roundHistory: state.roundHistory.map(entry => ({ ...entry })),
     eventHistory: (state.eventHistory ?? []).map(entry => ({ ...entry })),
-    goals: state.goals ? Object.fromEntries(Object.entries(state.goals).map(([key, value]) => [key, { ...value }])) : null
+    goals: state.goals ? Object.fromEntries(Object.entries(state.goals).map(([key, value]) => [key, { ...value }])) : null,
+    elite: cloneEliteState(state.elite)
   };
 }
 
@@ -379,7 +390,38 @@ export function settleSeasonRound(state) {
     next.seasonComplete = true;
     next.goals = getSeasonGoalStatus(next, next.match.snapshot);
     next.eliteQualified = next.goals.eliteQualified;
+    if (next.eliteQualified && next.elite.status === 'idle') {
+      next.elite = offerEliteInvitation(next.elite, next.seasonNumber);
+    }
   }
+  return next;
+}
+
+export function startSeasonEliteMatch(state, preparationId) {
+  if (!state?.seasonComplete || !state.eliteQualified) throw new Error('Season has no elite invitation');
+  const next = cloneSeasonState(state);
+  next.elite = startEliteMatch(next.elite, preparationId, {
+    ranking: Boolean(next.goals?.ranking.complete),
+    construction: Boolean(next.goals?.construction.complete)
+  });
+  return next;
+}
+
+export function getSeasonEliteMoment(state) {
+  return getEliteMatchMoment(state?.elite);
+}
+
+export function resolveSeasonEliteMoment(state, choiceId) {
+  if (!state?.seasonComplete) throw new Error('Season has no elite match');
+  const next = cloneSeasonState(state);
+  next.elite = resolveEliteMatchMoment(next.elite, choiceId);
+  return next;
+}
+
+export function declineSeasonEliteInvitation(state) {
+  if (!state?.seasonComplete) throw new Error('Season has no elite invitation');
+  const next = cloneSeasonState(state);
+  next.elite = declineEliteInvitation(next.elite);
   return next;
 }
 
@@ -396,6 +438,8 @@ export function advanceSeasonRound(state) {
 export function startNextSeason(state) {
   if (!state.seasonComplete) throw new Error('Finish the season before starting another');
   const next = cloneSeasonState(state);
+  if (next.elite.status === 'match') throw new Error('Finish the elite match before starting another season');
+  if (['invited', 'complete'].includes(next.elite.status)) next.elite = declineEliteInvitation(next.elite);
   next.active = true;
   next.seasonNumber += 1;
   next.roundIndex = 0;

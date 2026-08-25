@@ -7,6 +7,7 @@ import {
   cloneSeasonState,
   createSeasonState,
   getProjectUpgrade,
+  getSeasonEliteMoment,
   getSeasonGoalStatus,
   getSeasonMatchMoment,
   getStandings,
@@ -16,9 +17,11 @@ import {
   resolveSeasonEvent,
   resolveSeasonMatchMoment,
   settleSeasonRound,
+  startSeasonEliteMatch,
   startNextSeason,
   startSeasonMatch,
-  upgradeSeasonProject
+  upgradeSeasonProject,
+  resolveSeasonEliteMoment
 } from './season-state.js';
 import { getSeasonEvent } from './season-events.js';
 
@@ -33,6 +36,7 @@ test('a new season has eight empty standings rows and persistent progression slo
   assert.equal(season.week.eventChoiceId, null);
   assert.deepEqual(season.week.memoryNpcIds, []);
   assert.deepEqual(season.eventHistory, []);
+  assert.equal(season.elite.status, 'idle');
   const active = beginSeason(season);
   assert.equal(active.active, true);
   assert.equal(active.seasonNumber, 1);
@@ -111,12 +115,14 @@ test('old version five season state normalizes missing incident fields', () => {
   delete legacy.week.eventTag;
   delete legacy.week.memoryNpcIds;
   delete legacy.eventHistory;
+  delete legacy.elite;
   const normalized = cloneSeasonState(legacy);
   assert.equal(normalized.week.eventId, null);
   assert.equal(normalized.week.eventChoiceId, null);
   assert.equal(normalized.week.eventTag, null);
   assert.deepEqual(normalized.week.memoryNpcIds, []);
   assert.deepEqual(normalized.eventHistory, []);
+  assert.equal(normalized.elite.status, 'idle');
 });
 
 test('construction has three persistent levels and consumes a work action only when upgraded', () => {
@@ -173,6 +179,8 @@ function playRound(season, prepared) {
 test('seven rounds update the complete table and player choices change final rank', () => {
   let strong = beginSeason(createSeasonState());
   let weak = beginSeason(createSeasonState());
+  strong.projects.stands = 3;
+  strong.projects.clinic = 3;
   for (let round = 0; round < 7; round += 1) {
     strong = playRound(strong, true);
     weak = playRound(weak, false);
@@ -187,6 +195,28 @@ test('seven rounds update the complete table and player choices change final ran
   assert.ok(strongRank <= 4);
   assert.ok(weakRank > strongRank);
   assert.ok(strongRow.points > weakRow.points);
+  assert.equal(strong.elite.status, 'invited');
+  assert.equal(weak.elite.status, 'idle');
+});
+
+test('a qualified season plays one elite match and keeps its result next season', () => {
+  let season = beginSeason(createSeasonState());
+  season.projects.stands = 3;
+  season.projects.clinic = 3;
+  for (let round = 0; round < 7; round += 1) season = playRound(season, true);
+  season = startSeasonEliteMatch(season, 'shared-plan');
+  assert.equal(getSeasonEliteMoment(season).id, 'first-pass');
+  assert.throws(() => startNextSeason(season), /elite match/i);
+  for (const choiceId of ['use-league-shape', 'open-built-route', 'follow-shared-plan']) {
+    season = resolveSeasonEliteMoment(season, choiceId);
+  }
+  assert.equal(season.elite.result.id, 'champion');
+  assert.equal(season.elite.history.length, 1);
+  const next = startNextSeason(season);
+  assert.equal(next.seasonNumber, 2);
+  assert.equal(next.elite.status, 'idle');
+  assert.equal(next.elite.history.length, 1);
+  assert.equal(next.elite.bestResultId, 'champion');
 });
 
 test('goals are readable and a new season preserves projects and relationships', () => {
