@@ -2,12 +2,13 @@ import { createGameState } from './game-state.js';
 import { createEconomy, postLedgerEntry } from './economy-state.js';
 import { createEpisodeState } from './episode-state.js';
 import { createNamingRightsState } from './naming-rights-state.js';
+import { createSeasonState } from './season-state.js';
 
 function copyCommon(base, legacy) {
   return {
     ...base,
     ...legacy,
-    version: 4,
+    version: 5,
     inventory: { ...base.inventory, ...legacy.inventory },
     collectedToday: [...legacy.collectedToday],
     repairs: [...legacy.repairs],
@@ -17,7 +18,8 @@ function copyCommon(base, legacy) {
     journal: legacy.journal.map(entry => ({ ...entry })),
     history: legacy.history.map(entry => ({ ...entry })),
     episode: createEpisodeState(),
-    namingRights: createNamingRightsState()
+    namingRights: createNamingRightsState(),
+    season: createSeasonState()
   };
 }
 
@@ -40,7 +42,7 @@ export function migrateV1Record(record) {
   const base = createGameState();
   const legacy = record.state;
   return {
-    version: 4,
+    version: 5,
     state: {
       ...copyCommon(base, legacy),
       campaign: {
@@ -94,7 +96,7 @@ export function migrateV2Record(record) {
       ...legacy.world,
       positions: Object.fromEntries(Object.entries(legacy.world.positions).map(([id, point]) => [id, { ...point }]))
     };
-    return { version: 4, state: migrated, position: { ...record.position }, mapId: record.mapId };
+    return { version: 5, state: migrated, position: { ...record.position }, mapId: record.mapId };
   }
 
   const prologueCash = legacy.history.at(-1)?.money ?? legacy.money;
@@ -133,7 +135,7 @@ export function migrateV2Record(record) {
   }];
 
   return {
-    version: 4,
+    version: 5,
     state: migrated,
     position: { ...migrated.world.positions.stadium },
     mapId: 'stadium'
@@ -146,10 +148,10 @@ export function migrateV3Record(record) {
   }
   const legacy = record.state;
   return {
-    version: 4,
+    version: 5,
     state: {
       ...legacy,
-      version: 4,
+      version: 5,
       inventory: { ...legacy.inventory },
       collectedToday: [...legacy.collectedToday],
       repairs: [...legacy.repairs],
@@ -193,6 +195,80 @@ export function migrateV3Record(record) {
         } : null
       },
       namingRights: createNamingRightsState(),
+      season: createSeasonState(),
+      world: {
+        ...legacy.world,
+        positions: Object.fromEntries(Object.entries(legacy.world.positions).map(([id, point]) => [id, { ...point }]))
+      }
+    },
+    position: { ...record.position },
+    mapId: record.mapId
+  };
+}
+
+export function migrateV4Record(record) {
+  if (record?.version !== 4 || record?.state?.version !== 4) {
+    throw new TypeError('Unsupported version four save');
+  }
+  const legacy = record.state;
+  return {
+    version: 5,
+    state: {
+      ...legacy,
+      version: 5,
+      inventory: { ...legacy.inventory },
+      collectedToday: [...legacy.collectedToday],
+      repairs: [...legacy.repairs],
+      relationship: { ...legacy.relationship },
+      training: { ...legacy.training, started: false },
+      events: [...legacy.events],
+      journal: legacy.journal.map(entry => ({ ...entry })),
+      history: legacy.history.map(entry => ({ ...entry })),
+      campaign: { ...legacy.campaign },
+      episode: {
+        ...legacy.episode,
+        activePromise: null,
+        sceneHistory: [...legacy.episode.sceneHistory],
+        promisesChosen: [...legacy.episode.promisesChosen],
+        promisesCompleted: [...legacy.episode.promisesCompleted],
+        matchChoices: legacy.episode.matchChoices.map(choice => ({ ...choice })),
+        consequence: legacy.episode.consequence ? { ...legacy.episode.consequence } : null
+      },
+      economy: {
+        ...legacy.economy,
+        entries: legacy.economy.entries.map(entry => ({ ...entry })),
+        shortfall: legacy.economy.shortfall ? { ...legacy.economy.shortfall } : null
+      },
+      facilities: { ...legacy.facilities },
+      roster: { ...legacy.roster },
+      governance: { ...legacy.governance },
+      management: {
+        ...legacy.management,
+        completedActions: [...legacy.management.completedActions],
+        dailyRecords: legacy.management.dailyRecords.map(entry => ({ ...entry })),
+        match: legacy.management.match ? { ...legacy.management.match, choices: [...legacy.management.match.choices] } : null,
+        matchResult: legacy.management.matchResult ? {
+          ...legacy.management.matchResult,
+          score: { ...legacy.management.matchResult.score }
+        } : null,
+        settlement: legacy.management.settlement ? structuredClone(legacy.management.settlement) : null
+      },
+      namingRights: {
+        ...legacy.namingRights,
+        sceneHistory: [...legacy.namingRights.sceneHistory],
+        freeTime: {
+          ...legacy.namingRights.freeTime,
+          activeAction: null,
+          records: legacy.namingRights.freeTime.records.map(entry => ({ ...entry }))
+        },
+        match: legacy.namingRights.match ? {
+          ...legacy.namingRights.match,
+          choices: [...legacy.namingRights.match.choices],
+          callbackIds: [...legacy.namingRights.match.callbackIds]
+        } : null,
+        settlement: legacy.namingRights.settlement ? structuredClone(legacy.namingRights.settlement) : null
+      },
+      season: createSeasonState(),
       world: {
         ...legacy.world,
         positions: Object.fromEntries(Object.entries(legacy.world.positions).map(([id, point]) => [id, { ...point }]))

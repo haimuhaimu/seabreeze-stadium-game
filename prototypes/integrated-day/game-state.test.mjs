@@ -30,7 +30,15 @@ import {
   startNamingFreeAction,
   finishNamingFreeAction,
   startSecondWeeklyMatch,
-  resolveSecondWeeklyMatchChoice
+  resolveSecondWeeklyMatchChoice,
+  beginLeagueSeason,
+  chooseSeasonAction,
+  chooseSeasonNpcResponse,
+  buildSeasonProject,
+  startLeagueMatch,
+  resolveLeagueMatchChoice,
+  advanceLeagueRound,
+  beginNextLeagueSeason
 } from './game-state.js';
 
 test('a direct entry starts at the visible management week without erasing prologue history', () => {
@@ -210,7 +218,7 @@ test('the management week advances only after the required story action', () => 
 
 test('the first week starts with a fixed opponent and blank notice', () => {
   const state = beginManagementWeek(completedPrologue());
-  assert.equal(state.version, 4);
+  assert.equal(state.version, 5);
   assert.equal(state.management.opponentId, 'city-university');
   assert.equal(state.episode.sceneId, 'blank-notice');
 });
@@ -340,4 +348,92 @@ test('co-naming and delay remain reachable without optional-action thresholds', 
     assert.equal(state.namingRights.voteRoute, routeId);
     assert.equal(state.phase, 'complete');
   }
+});
+
+function completedNamingWeek() {
+  let state = beginNamingRightsWeek(completedFirstWeek());
+  state = completeNamingMainline(state, 'naming-proposal', 'hold-public-vote');
+  state = advanceCampaignDay(state);
+  state = finishNamingAction(state, 'naming-chairs', 'write-conditions', 'shop');
+  state = advanceCampaignDay(state);
+  state = finishNamingAction(state, 'naming-alternative', 'open-free-time', 'community');
+  state = advanceCampaignDay(state);
+  state = finishNamingAction(state, 'naming-plaque', 'acknowledge-history', 'shop');
+  state = advanceCampaignDay(state);
+  state = completeNamingMainline(state, 'naming-vote', 'community-save');
+  state = advanceCampaignDay(state);
+  state = finishNamingAction(state, 'naming-response', 'restore-history', 'archive');
+  state = advanceCampaignDay(state);
+  state = startSecondWeeklyMatch(state);
+  for (const choiceId of ['keep-gates-open', 'steady-everyone', 'let-name-show']) {
+    state = resolveSecondWeeklyMatchChoice(state, choiceId);
+  }
+  return state;
+}
+
+test('the naming-week settlement opens a persistent league', () => {
+  const namingWeek = completedNamingWeek();
+  const signName = namingWeek.namingRights.settlement.stadiumName;
+  const state = beginLeagueSeason(namingWeek);
+  assert.equal(state.version, 5);
+  assert.equal(state.dayIndex, 17);
+  assert.equal(state.phase, 'morning');
+  assert.equal(state.season.active, true);
+  assert.equal(state.season.roundIndex, 0);
+  assert.equal(state.namingRights.settlement.stadiumName, signName);
+});
+
+test('season actions, NPC responses, and construction update shared progress once', () => {
+  let state = beginLeagueSeason(completedNamingWeek());
+  const cashBefore = state.economy.cash;
+  const attackBefore = state.roster.attack;
+  state = chooseSeasonNpcResponse(state, 'coach-guo', 'solve');
+  assert.equal(state.season.relationships['coach-guo'], 1);
+  state = chooseSeasonAction(state, 'train-attack');
+  state = chooseSeasonAction(state, 'shop-day');
+  assert.equal(state.roster.attack, attackBefore + 4);
+  assert.ok(state.economy.cash > cashBefore);
+  const actionsBeforeBuild = state.season.week.actions.length;
+  const poor = { ...state, economy: { ...state.economy, cash: 0 }, money: 0 };
+  const blocked = buildSeasonProject(poor, 'stands');
+  assert.equal(blocked.season.week.actions.length, actionsBeforeBuild);
+  assert.equal(blocked.season.projects.stands, 0);
+  state = buildSeasonProject(state, 'stands');
+  assert.equal(state.season.projects.stands, 1);
+  assert.equal(state.season.week.actions.length, 3);
+  assert.ok(state.economy.cash < cashBefore + 34);
+});
+
+test('league match settlement pays income, updates standings, and opens the next round', () => {
+  let state = beginLeagueSeason(completedNamingWeek());
+  state = chooseSeasonNpcResponse(state, 'coach-guo', 'solve');
+  state = chooseSeasonAction(state, 'train-attack');
+  state = chooseSeasonAction(state, 'community-open');
+  state = buildSeasonProject(state, 'stands');
+  const cashBeforeMatch = state.economy.cash;
+  state = startLeagueMatch(state);
+  for (const choiceId of ['use-attack-work', 'open-safe-stands', 'follow-coach-note']) {
+    state = resolveLeagueMatchChoice(state, choiceId);
+  }
+  assert.equal(state.phase, 'complete');
+  assert.equal(state.season.week.roundComplete, true);
+  assert.equal(state.season.standings.find(row => row.teamId === 'haifeng').played, 1);
+  assert.ok(state.economy.cash > cashBeforeMatch);
+  state = advanceLeagueRound(state);
+  assert.equal(state.phase, 'morning');
+  assert.equal(state.season.roundIndex, 1);
+  assert.deepEqual(state.season.week.actions, []);
+});
+
+test('a completed league can start another season without erasing construction or bonds', () => {
+  let state = beginLeagueSeason(completedNamingWeek());
+  state.season.projects.stands = 2;
+  state.season.relationships['coach-guo'] = 3;
+  state.season.seasonComplete = true;
+  state.season.week.roundComplete = true;
+  const next = beginNextLeagueSeason(state);
+  assert.equal(next.season.seasonNumber, 2);
+  assert.equal(next.season.projects.stands, 2);
+  assert.equal(next.season.relationships['coach-guo'], 3);
+  assert.equal(next.phase, 'morning');
 });

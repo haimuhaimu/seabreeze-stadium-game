@@ -1,6 +1,7 @@
-import { migrateV1Record, migrateV2Record, migrateV3Record } from './save-migration.js';
+import { migrateV1Record, migrateV2Record, migrateV3Record, migrateV4Record } from './save-migration.js';
 
-export const SAVE_KEY = 'seabreeze-club-save-v4';
+export const SAVE_KEY = 'seabreeze-club-save-v5';
+export const V4_SAVE_KEY = 'seabreeze-club-save-v4';
 export const V3_SAVE_KEY = 'seabreeze-club-save-v3';
 export const V2_SAVE_KEY = 'seabreeze-club-save-v2';
 export const LEGACY_SAVE_KEY = 'seabreeze-club-save-v1';
@@ -8,6 +9,8 @@ export const LEGACY_SAVE_KEY = 'seabreeze-club-save-v1';
 const PHASES = new Set(['morning', 'shop', 'evening', 'complete']);
 const REPAIR_IDS = new Set(['net', 'awning', 'bleachers']);
 const MAP_IDS = new Set(['training', 'stadium']);
+const SEASON_PROJECT_IDS = ['stands', 'clinic', 'academy', 'market', 'lights'];
+const SEASON_NPC_IDS = ['coach-guo', 'lin-chuan', 'aunt-xu', 'xiaoman', 'shen-qiao', 'director-luo'];
 
 function isFiniteNonNegative(value) {
   return Number.isFinite(value) && value >= 0;
@@ -175,11 +178,67 @@ function validV4State(state) {
   );
 }
 
+function validSeasonMatch(match) {
+  return match === null || Boolean(
+    match
+    && typeof match.opponentId === 'string'
+    && typeof match.playerHome === 'boolean'
+    && Number.isInteger(match.highlightIndex)
+    && isFiniteNonNegative(match.homeGoals)
+    && isFiniteNonNegative(match.awayGoals)
+    && Array.isArray(match.choices)
+    && Array.isArray(match.callbackIds)
+    && typeof match.complete === 'boolean'
+    && match.snapshot
+    && ['attack', 'defense', 'cohesion', 'facility', 'cash'].every(key => Number.isFinite(match.snapshot[key]))
+  );
+}
+
+function validSeason(season) {
+  return Boolean(
+    season?.id === 'haifeng-league'
+    && typeof season.active === 'boolean'
+    && Number.isInteger(season.seasonNumber)
+    && season.seasonNumber >= 0
+    && Number.isInteger(season.roundIndex)
+    && season.roundIndex >= 0
+    && season.roundIndex <= 6
+    && season.week
+    && Array.isArray(season.week.actions)
+    && Array.isArray(season.week.talkedNpcIds)
+    && season.week.npcResponses
+    && typeof season.week.npcResponses === 'object'
+    && Array.isArray(season.week.helpTags)
+    && typeof season.week.roundComplete === 'boolean'
+    && SEASON_PROJECT_IDS.every(id => Number.isInteger(season.projects?.[id]) && season.projects[id] >= 0 && season.projects[id] <= 3)
+    && SEASON_NPC_IDS.every(id => Number.isInteger(season.relationships?.[id]) && season.relationships[id] >= 0 && season.relationships[id] <= 5)
+    && Array.isArray(season.standings)
+    && season.standings.length === 8
+    && season.standings.every(row => row && typeof row.teamId === 'string' && Number.isInteger(row.played) && isFiniteNonNegative(row.points))
+    && validSeasonMatch(season.match)
+    && Array.isArray(season.roundHistory)
+    && typeof season.seasonComplete === 'boolean'
+    && typeof season.eliteQualified === 'boolean'
+    && (season.goals === null || typeof season.goals === 'object')
+  );
+}
+
+function validV5State(state) {
+  return Boolean(
+    state?.version === 5
+    && validPrologueFields(state, 23)
+    && validManagementState(state)
+    && validEpisode(state.episode)
+    && validNamingRights(state.namingRights)
+    && validSeason(state.season)
+  );
+}
+
 export function validateSaveRecord(record) {
   return Boolean(
     record
-    && record.version === 4
-    && validV4State(record.state)
+    && record.version === 5
+    && validV5State(record.state)
     && validPosition(record.position)
     && MAP_IDS.has(record.mapId)
   );
@@ -197,7 +256,8 @@ function closeInterruptedActivities(record) {
   const trainingStarted = record.state.training.started;
   const episodeStarted = Boolean(record.state.episode.activePromise);
   const freeActionStarted = Boolean(record.state.namingRights?.freeTime?.activeAction);
-  if (!trainingStarted && !episodeStarted && !freeActionStarted) return record;
+  const seasonMatchStarted = Boolean(record.state.season?.match && !record.state.season.week.roundComplete);
+  if (!trainingStarted && !episodeStarted && !freeActionStarted && !seasonMatchStarted) return record;
   return {
     ...record,
     state: {
@@ -207,7 +267,8 @@ function closeInterruptedActivities(record) {
       namingRights: record.state.namingRights ? {
         ...record.state.namingRights,
         freeTime: { ...record.state.namingRights.freeTime, activeAction: null, available: true }
-      } : record.state.namingRights
+      } : record.state.namingRights,
+      season: seasonMatchStarted ? { ...record.state.season, match: null } : record.state.season
     }
   };
 }
@@ -216,9 +277,11 @@ function loadAndValidate(raw, version) {
   const parsed = parseRecord(raw);
   if (!parsed.ok) return parsed;
   if (!parsed.record || parsed.record.version !== version) return { ok: false, reason: 'unsupported-version' };
-  const valid = version === 4
+  const valid = version === 5
     ? validateSaveRecord(parsed.record)
-    : version === 3
+    : version === 4
+      ? Boolean(validV4State(parsed.record.state) && validPosition(parsed.record.position) && MAP_IDS.has(parsed.record.mapId))
+      : version === 3
       ? validV3Record(parsed.record)
       : version === 2
         ? validV2Record(parsed.record)
@@ -230,9 +293,16 @@ function loadAndValidate(raw, version) {
 export function loadSave(storage) {
   const currentRaw = storage.getItem(SAVE_KEY);
   if (currentRaw !== null) {
-    const loaded = loadAndValidate(currentRaw, 4);
+    const loaded = loadAndValidate(currentRaw, 5);
     if (!loaded.ok) return loaded;
     return { ok: true, record: closeInterruptedActivities(loaded.record) };
+  }
+
+  const versionFourRaw = storage.getItem(V4_SAVE_KEY);
+  if (versionFourRaw !== null) {
+    const loaded = loadAndValidate(versionFourRaw, 4);
+    if (!loaded.ok) return loaded;
+    return { ok: true, record: closeInterruptedActivities(migrateV4Record(loaded.record)), migrated: true };
   }
 
   const versionThreeRaw = storage.getItem(V3_SAVE_KEY);
@@ -257,7 +327,7 @@ export function loadSave(storage) {
 }
 
 export function writeSave(storage, state, position, mapId = state.world?.mapId ?? 'training') {
-  const record = { version: 4, state, position, mapId };
+  const record = { version: 5, state, position, mapId };
   if (!validateSaveRecord(record)) throw new TypeError('Invalid save record');
   storage.setItem(SAVE_KEY, JSON.stringify(record));
   return record;
@@ -265,6 +335,7 @@ export function writeSave(storage, state, position, mapId = state.world?.mapId ?
 
 export function clearSave(storage) {
   storage.removeItem(SAVE_KEY);
+  storage.removeItem(V4_SAVE_KEY);
   storage.removeItem(V3_SAVE_KEY);
   storage.removeItem(V2_SAVE_KEY);
   storage.removeItem(LEGACY_SAVE_KEY);

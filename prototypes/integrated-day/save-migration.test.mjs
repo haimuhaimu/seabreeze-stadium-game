@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createGameState } from './game-state.js';
-import { migrateV1Record, migrateV2Record, migrateV3Record } from './save-migration.js';
+import { migrateV1Record, migrateV2Record, migrateV3Record, migrateV4Record } from './save-migration.js';
 
 test('a completed version one prologue migrates without losing progress', () => {
   const legacy = {
@@ -30,8 +30,8 @@ test('a completed version one prologue migrates without losing progress', () => 
     position: { x: 50, y: 89 }
   });
 
-  assert.equal(migrated.version, 4);
-  assert.equal(migrated.state.version, 4);
+  assert.equal(migrated.version, 5);
+  assert.equal(migrated.state.version, 5);
   assert.equal(migrated.state.money, 37);
   assert.equal(migrated.state.economy.cash, 37);
   assert.deepEqual(migrated.state.repairs, ['awning']);
@@ -65,7 +65,7 @@ function versionTwoRecord({ dayIndex, weekComplete }) {
 
 test('an unfinished version two week restarts the new spring 15 episode', () => {
   const migrated = migrateV2Record(versionTwoRecord({ dayIndex: 6, weekComplete: false }));
-  assert.equal(migrated.version, 4);
+  assert.equal(migrated.version, 5);
   assert.equal(migrated.state.dayIndex, 3);
   assert.equal(migrated.state.phase, 'morning');
   assert.equal(migrated.state.episode.sceneId, 'blank-notice');
@@ -99,9 +99,40 @@ test('a version three record gains second-week state without losing the first-we
   delete legacy.namingRights;
   const record = { version: 3, state: legacy, position: { x: 54, y: 71 }, mapId: 'stadium' };
   const migrated = migrateV3Record(record);
-  assert.equal(migrated.version, 4);
-  assert.equal(migrated.state.version, 4);
+  assert.equal(migrated.version, 5);
+  assert.equal(migrated.state.version, 5);
   assert.equal(migrated.state.dayIndex, 9);
   assert.deepEqual(migrated.state.management.settlement.score, { home: 2, away: 1 });
   assert.equal(migrated.state.namingRights.id, 'naming-rights');
+});
+
+test('a version four save gains an inactive season without losing its sign reveal', () => {
+  const current = createGameState();
+  const state = {
+    ...current,
+    version: 4,
+    dayIndex: 16,
+    phase: 'complete',
+    namingRights: {
+      ...current.namingRights,
+      weekComplete: true,
+      voteRoute: 'community-save',
+      response: 'restore-history',
+      settlement: {
+        route: 'community-save',
+        stadiumName: '海风球场',
+        authority: '五把椅子保留最终决定权',
+        score: { home: 2, away: 1 },
+        callbacks: ['community']
+      }
+    }
+  };
+  delete state.season;
+  const record = { version: 4, state, position: { x: 52, y: 68 }, mapId: 'stadium' };
+  const migrated = migrateV4Record(record);
+  assert.equal(migrated.version, 5);
+  assert.equal(migrated.state.version, 5);
+  assert.equal(migrated.state.namingRights.settlement.stadiumName, '海风球场');
+  assert.equal(migrated.state.season.id, 'haifeng-league');
+  assert.equal(migrated.state.season.active, false);
 });
