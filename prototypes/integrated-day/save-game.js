@@ -1,4 +1,5 @@
 import { migrateV1Record, migrateV2Record, migrateV3Record, migrateV4Record } from './save-migration.js';
+import { cloneSeasonState } from './season-state.js';
 
 export const SAVE_KEY = 'seabreeze-club-save-v5';
 export const V4_SAVE_KEY = 'seabreeze-club-save-v4';
@@ -256,19 +257,27 @@ function closeInterruptedActivities(record) {
   const trainingStarted = record.state.training.started;
   const episodeStarted = Boolean(record.state.episode.activePromise);
   const freeActionStarted = Boolean(record.state.namingRights?.freeTime?.activeAction);
-  const seasonMatchStarted = Boolean(record.state.season?.match && !record.state.season.week.roundComplete);
-  if (!trainingStarted && !episodeStarted && !freeActionStarted && !seasonMatchStarted) return record;
+  const season = cloneSeasonState(record.state.season);
+  const seasonMatchStarted = Boolean(season.match && !season.week.roundComplete);
+  const eliteMatchStarted = season.elite.status === 'match';
+  if (seasonMatchStarted) season.match = null;
+  if (eliteMatchStarted) {
+    season.elite.status = 'invited';
+    season.elite.preparationId = null;
+    season.elite.match = null;
+    season.elite.result = null;
+  }
   return {
     ...record,
     state: {
       ...record.state,
-      training: { ...record.state.training, started: false },
-      episode: { ...record.state.episode, activePromise: null },
-      namingRights: record.state.namingRights ? {
+      training: trainingStarted ? { ...record.state.training, started: false } : record.state.training,
+      episode: episodeStarted ? { ...record.state.episode, activePromise: null } : record.state.episode,
+      namingRights: freeActionStarted && record.state.namingRights ? {
         ...record.state.namingRights,
         freeTime: { ...record.state.namingRights.freeTime, activeAction: null, available: true }
       } : record.state.namingRights,
-      season: seasonMatchStarted ? { ...record.state.season, match: null } : record.state.season
+      season
     }
   };
 }

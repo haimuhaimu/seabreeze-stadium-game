@@ -46,6 +46,7 @@ import {
   beginSeason,
   cloneSeasonState,
   createSeasonState,
+  getSeasonEliteMoment,
   getProjectUpgrade,
   recordSeasonAction,
   recordSeasonMemoryTalk,
@@ -53,9 +54,11 @@ import {
   resolveSeasonEvent,
   resolveSeasonMatchMoment,
   settleSeasonRound,
+  startSeasonEliteMatch,
   startNextSeason,
   startSeasonMatch,
-  upgradeSeasonProject
+  upgradeSeasonProject,
+  resolveSeasonEliteMoment
 } from './season-state.js';
 import {
   SEASON_ACTIONS,
@@ -66,6 +69,7 @@ import {
 } from './season-content.js';
 import { getSeasonEventChoice } from './season-events.js';
 import { getSeasonNpcMemory } from './season-memory.js';
+import { ELITE_RESULTS, getElitePreparation } from './elite-content.js';
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -1394,7 +1398,13 @@ export function advanceLeagueRound(state) {
 export function beginNextLeagueSeason(state) {
   if (!state.season?.seasonComplete) return addJournal(state, 'quiet', '这个赛季还没有结束。');
   const next = copyState(state);
-  next.season = startNextSeason(next.season);
+  try {
+    next.season = startNextSeason(next.season);
+  } catch (error) {
+    return addJournal(state, 'quiet', error.message.includes('elite match')
+      ? '先把已经开始的精英邀请赛踢完。'
+      : '现在还不能进入下一赛季。');
+  }
   next.dayIndex = 17;
   next.phase = 'morning';
   next.minute = 550;
@@ -1405,5 +1415,67 @@ export function beginNextLeagueSeason(state) {
     text: `第 ${next.season.seasonNumber} 个赛季开始。建设和关系都还在，积分榜重新归零。`,
     minute: next.minute
   }];
+  return next;
+}
+
+function validEliteFinaleState(state) {
+  return Boolean(state.season?.active && state.season.seasonComplete && state.phase === 'complete');
+}
+
+export function chooseElitePreparation(state, preparationId) {
+  if (!validEliteFinaleState(state)) return addJournal(state, 'quiet', '现在还没有精英邀请。');
+  let season;
+  let preparation;
+  try {
+    preparation = getElitePreparation(preparationId);
+    season = startSeasonEliteMatch(state.season, preparationId);
+  } catch {
+    return addJournal(state, 'quiet', '这项精英赛准备现在不能开始。');
+  }
+  const next = copyState(state);
+  next.season = season;
+  next.minute += 15;
+  appendManagementJournal(next, 'elite', `海风队选择“${preparation.label}”，鹤岭青训联队已经进场。`);
+  return next;
+}
+
+export function chooseEliteMatchChoice(state, choiceId) {
+  if (!validEliteFinaleState(state) || state.season.elite?.status !== 'match') {
+    return addJournal(state, 'quiet', '现在没有进行中的精英邀请赛。');
+  }
+  let moment;
+  let selected;
+  let season;
+  try {
+    moment = getSeasonEliteMoment(state.season);
+    selected = moment.choices.find(choice => choice.id === choiceId);
+    if (!selected) throw new TypeError('Unknown elite choice');
+    season = resolveSeasonEliteMoment(state.season, choiceId);
+  } catch {
+    return addJournal(state, 'quiet', '这个比赛选择现在不能使用。');
+  }
+  const next = copyState(state);
+  next.season = season;
+  next.minute += 8;
+  if (season.elite.status !== 'complete') {
+    appendManagementJournal(next, 'elite', selected.copy);
+    return next;
+  }
+
+  const result = season.elite.result;
+  const resultContent = ELITE_RESULTS[result.id];
+  next.economy = postLedgerEntry(next.economy, {
+    id: `elite-${result.seasonNumber}`,
+    label: '精英邀请赛结算',
+    amount: resultContent.effects.cash
+  });
+  next.roster.cohesion = clamp(next.roster.cohesion + resultContent.effects.cohesion, 0, 100);
+  next.communitySupport = clamp(next.communitySupport + resultContent.effects.community, 0, 100);
+  syncManagementCash(next);
+  appendManagementJournal(
+    next,
+    'elite',
+    `精英邀请赛终场，海风 ${result.homeGoals} 比 ${result.awayGoals} 鹤岭。${resultContent.label}。`
+  );
   return next;
 }

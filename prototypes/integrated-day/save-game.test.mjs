@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chooseSeasonEventDecision, chooseSeasonNpcMemory, createGameState } from './game-state.js';
 import { createEpisodeState } from './episode-state.js';
+import { offerEliteInvitation } from './elite-state.js';
+import { startSeasonEliteMatch } from './season-state.js';
 import { SAVE_KEY, V4_SAVE_KEY, V3_SAVE_KEY, V2_SAVE_KEY, LEGACY_SAVE_KEY, loadSave, writeSave, clearSave } from './save-game.js';
 
 function memoryStorage() {
@@ -188,13 +190,41 @@ test('an early version five league save gains incident fields on its next decisi
   delete state.season.week.eventTag;
   delete state.season.week.memoryNpcIds;
   delete state.season.eventHistory;
+  delete state.season.elite;
   writeSave(storage, state, { x: 52, y: 68 }, 'stadium');
   const loaded = loadSave(storage);
   assert.equal(loaded.ok, true);
+  assert.equal(loaded.record.state.season.elite.status, 'idle');
   const decided = chooseSeasonEventDecision(loaded.record.state, 'shared-pitch', 'share-half');
   const remembered = chooseSeasonNpcMemory(decided, 'xiaoman');
   assert.equal(remembered.season.projects.stands, 2);
   assert.equal(remembered.season.week.eventChoiceId, 'share-half');
   assert.deepEqual(remembered.season.week.memoryNpcIds, ['xiaoman']);
   assert.equal(remembered.season.eventHistory.length, 1);
+});
+
+test('an interrupted elite match returns to its invitation without duplicating rewards', () => {
+  const storage = memoryStorage();
+  const state = createGameState();
+  state.dayIndex = 23;
+  state.phase = 'complete';
+  state.world.mapId = 'stadium';
+  state.season.active = true;
+  state.season.seasonNumber = 1;
+  state.season.seasonComplete = true;
+  state.season.eliteQualified = true;
+  state.season.goals = {
+    ranking: { complete: true }, construction: { complete: true },
+    people: { complete: false }, finance: { complete: false }, eliteQualified: true
+  };
+  state.season.elite = offerEliteInvitation(state.season.elite, 1);
+  state.season = startSeasonEliteMatch(state.season, 'repair-buffer');
+  writeSave(storage, state, { x: 52, y: 68 }, 'stadium');
+  const loaded = loadSave(storage);
+  assert.equal(loaded.ok, true);
+  assert.equal(loaded.record.state.season.elite.status, 'invited');
+  assert.equal(loaded.record.state.season.elite.preparationId, null);
+  assert.equal(loaded.record.state.season.elite.match, null);
+  assert.equal(loaded.record.state.season.elite.result, null);
+  assert.deepEqual(loaded.record.state.season.elite.history, []);
 });

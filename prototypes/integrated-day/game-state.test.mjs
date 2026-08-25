@@ -32,6 +32,8 @@ import {
   startSecondWeeklyMatch,
   resolveSecondWeeklyMatchChoice,
   beginLeagueSeason,
+  chooseEliteMatchChoice,
+  chooseElitePreparation,
   chooseSeasonEventDecision,
   chooseSeasonNpcMemory,
   chooseSeasonAction,
@@ -42,6 +44,7 @@ import {
   advanceLeagueRound,
   beginNextLeagueSeason
 } from './game-state.js';
+import { offerEliteInvitation } from './elite-state.js';
 
 test('a direct entry starts at the visible management week without erasing prologue history', () => {
   const state = createFirstWeekEntryState();
@@ -470,4 +473,50 @@ test('a completed league can start another season without erasing construction o
   assert.equal(next.season.projects.stands, 2);
   assert.equal(next.season.relationships['coach-guo'], 3);
   assert.equal(next.phase, 'morning');
+});
+
+function qualifiedLeagueEnd() {
+  const state = beginLeagueSeason(completedNamingWeek());
+  state.phase = 'complete';
+  state.season.seasonComplete = true;
+  state.season.eliteQualified = true;
+  state.season.goals = {
+    ranking: { complete: true, current: 2, target: 4 },
+    construction: { complete: true, current: 7, target: 6 },
+    people: { complete: true, current: 3, target: 3 },
+    finance: { complete: true, current: state.economy.cash, target: 180 },
+    eliteQualified: true
+  };
+  state.season.elite = offerEliteInvitation(state.season.elite, state.season.seasonNumber);
+  return state;
+}
+
+test('the elite finale pays its permanent reward exactly once and then opens a new season', () => {
+  const invited = qualifiedLeagueEnd();
+  const cashBefore = invited.economy.cash;
+  const cohesionBefore = invited.roster.cohesion;
+  const communityBefore = invited.communitySupport;
+  const actionsBefore = [...invited.season.week.actions];
+  let state = chooseElitePreparation(invited, 'shared-plan');
+  assert.equal(state.season.elite.status, 'match');
+  assert.equal(state.economy.cash, cashBefore);
+  assert.deepEqual(state.season.week.actions, actionsBefore);
+  const blocked = beginNextLeagueSeason(state);
+  assert.equal(blocked.season.seasonNumber, 1);
+  assert.equal(blocked.season.elite.status, 'match');
+  for (const choiceId of ['use-league-shape', 'open-built-route', 'follow-shared-plan']) {
+    state = chooseEliteMatchChoice(state, choiceId);
+  }
+  assert.equal(state.season.elite.result.id, 'champion');
+  assert.equal(state.economy.cash, cashBefore + 160);
+  assert.equal(state.roster.cohesion, cohesionBefore + 4);
+  assert.equal(state.communitySupport, communityBefore + 8);
+  assert.equal(state.economy.entries.filter(entry => entry.id === 'elite-1').length, 1);
+  const repeated = chooseEliteMatchChoice(state, 'follow-shared-plan');
+  assert.equal(repeated.economy.cash, state.economy.cash);
+  assert.equal(repeated.economy.entries.filter(entry => entry.id === 'elite-1').length, 1);
+  const next = beginNextLeagueSeason(state);
+  assert.equal(next.season.seasonNumber, 2);
+  assert.equal(next.season.elite.history.length, 1);
+  assert.equal(next.season.elite.bestResultId, 'champion');
 });
