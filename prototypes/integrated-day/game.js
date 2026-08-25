@@ -49,6 +49,7 @@ import {
   chooseSeasonNpcMemory,
   chooseSeasonNpcResponse,
   buildSeasonProject,
+  visitSeasonProject,
   startLeagueMatch,
   resolveLeagueMatchChoice,
   advanceLeagueRound,
@@ -90,6 +91,7 @@ import {
 } from './season-content.js';
 import { SEASON_EVENTS, getSeasonEvent, getSeasonEventChoice } from './season-events.js';
 import { ELITE_OPPONENT, ELITE_PREPARATIONS, ELITE_RESULTS } from './elite-content.js';
+import { getConstructionScene, getConstructionVisuals } from './construction-content.js';
 
 const root = document.querySelector('.game');
 const viewport = document.querySelector('[data-scene]');
@@ -122,6 +124,7 @@ const seasonSummary = document.querySelector('[data-season-summary]');
 const elitePanel = document.querySelector('[data-elite-panel]');
 const seasonDocket = document.querySelector('[data-season-docket]');
 const stadiumSign = document.querySelector('[data-stadium-sign]');
+const constructionVisuals = document.querySelector('[data-construction-visuals]');
 const summaryDim = document.querySelector('[data-summary-dim]');
 const resourceIcon = document.querySelector('.money-slot .item-sprite');
 const touchControls = document.querySelector('.touch-controls');
@@ -177,6 +180,8 @@ let activeSeasonNpcId = null;
 let activeSeasonEventId = null;
 let seasonBoardOpen = false;
 let elitePanelOpen = false;
+let recentProjectBuildId = null;
+let constructionRevealTimer = 0;
 const pressedKeys = new Set();
 
 function isLeagueSeason() {
@@ -747,6 +752,12 @@ function makeWorldButton(id, object) {
     if (object.kind.startsWith('season-')) {
       button.classList.add('season-world-target', object.kind === 'season-event' ? 'season-event-target' : object.kind);
     }
+    if (object.kind === 'season-project') {
+      button.dataset.level = String(object.level);
+      button.dataset.visited = String(object.visited);
+      button.dataset.built = String(object.level > 0);
+      button.dataset.buildAvailable = String(object.buildAvailable);
+    }
     const ring = document.createElement('span');
     ring.className = 'target-ring';
     const marker = document.createElement('span');
@@ -758,7 +769,9 @@ function makeWorldButton(id, object) {
         : object.kind === 'season-action'
           ? SEASON_ACTIONS[object.actionId].label
           : object.kind === 'season-project'
-            ? `${getSeasonProject(object.projectId).label} ${state.season.projects[object.projectId]}/3`
+            ? object.level > 0
+              ? `${getConstructionScene(object.projectId).levels[object.level - 1].label} ${object.level}/3`
+              : `${getSeasonProject(object.projectId).label} 待开工`
             : object.kind === 'season-event'
               ? '回应本轮事件'
             : object.kind === 'season-match'
@@ -767,6 +780,36 @@ function makeWorldButton(id, object) {
     button.append(ring, marker);
   }
   return button;
+}
+
+function renderConstructionVisuals() {
+  const visible = isLeagueSeason();
+  constructionVisuals.hidden = !visible;
+  if (!visible) {
+    constructionVisuals.replaceChildren();
+    return;
+  }
+  const fragment = document.createDocumentFragment();
+  for (const visual of getConstructionVisuals(activeMapId, state.season.projects)) {
+    const item = document.createElement('div');
+    item.className = `construction-visual construction-${visual.projectId}${visual.complete ? ' is-complete' : ''}${recentProjectBuildId === visual.projectId ? ' is-revealing' : ''}`;
+    item.dataset.constructionProject = visual.projectId;
+    item.dataset.level = String(visual.level);
+    item.style.setProperty('--construction-x', `${visual.x}%`);
+    item.style.setProperty('--construction-y', `${visual.y}%`);
+    item.style.setProperty('--construction-width', `${visual.width}%`);
+    item.style.setProperty('--construction-height', `${visual.height}%`);
+    const plaque = document.createElement('span');
+    plaque.className = 'construction-plaque';
+    const progress = document.createElement('small');
+    progress.textContent = visual.complete ? '稳定运营' : `${visual.level} / 3`;
+    const label = document.createElement('strong');
+    label.textContent = visual.stageLabel;
+    plaque.append(progress, label);
+    item.append(plaque);
+    fragment.append(item);
+  }
+  constructionVisuals.replaceChildren(fragment);
 }
 
 function renderStadiumSign() {
@@ -824,6 +867,7 @@ function renderWorldTargets() {
     : shopReady ? '可以开店' : '场边小店';
 
   renderStadiumSign();
+  renderConstructionVisuals();
   renderDynamicWorldContent();
   updateProximity(true);
 }
@@ -930,19 +974,45 @@ function getDecisionConfig(actionId) {
     const project = SEASON_PROJECTS[projectId];
     if (!project) return null;
     const currentLevel = state.season.projects[projectId];
-    const upgrade = project.levels[currentLevel];
-    if (!upgrade) return null;
-    const affordable = state.economy.cash >= upgrade.cost;
+    const scene = getConstructionScene(projectId);
+    const currentStage = currentLevel ? scene.levels[currentLevel - 1] : null;
+    const upgrade = project.levels[currentLevel] ?? null;
+    const affordable = upgrade ? state.economy.cash >= upgrade.cost : false;
+    const alreadyBuilt = state.season.week.actions.includes(`build:${projectId}`);
+    const actionsFull = state.season.week.actions.length >= 3;
+    const visited = state.season.week.visitedProjectIds.includes(projectId);
+    const options = [];
+    if (currentLevel > 0) {
+      options.push({
+        id: `visit:${projectId}`,
+        label: visited ? `本轮已经和${getSeasonNpc(scene.patronId).name}来过` : `和${getSeasonNpc(scene.patronId).name}一起用一会儿`,
+        detail: visited ? '下一轮还可以再来' : '12 分钟 / 不占经营行动 / 关系 +1',
+        disabled: visited
+      });
+    }
+    if (upgrade) {
+      const blocked = !affordable || alreadyBuilt || actionsFull;
+      const blockedLabel = !affordable
+        ? `还缺 ${upgrade.cost - state.economy.cash} 元`
+        : alreadyBuilt
+          ? '这轮已经完成一次建设'
+          : actionsFull
+            ? '本轮三个行动已经排满'
+            : null;
+      options.push({
+        id: projectId,
+        label: blockedLabel ?? `投入 ${upgrade.cost} 元继续建设`,
+        detail: blocked ? '不会消耗现金或行动位' : `完成${upgrade.label}，达到 ${currentLevel + 1} / 3 级`,
+        disabled: blocked
+      });
+    }
     return {
       kicker: `${project.label} ${currentLevel} / 3`,
-      title: upgrade.label,
-      copy: `建设会永久保留，也会占用本轮一个行动位。账上现有 ${state.economy.cash} 元。`,
-      options: [{
-        id: projectId,
-        label: affordable ? `投入 ${upgrade.cost} 元开始建设` : `还缺 ${upgrade.cost - state.economy.cash} 元`,
-        detail: affordable ? `完成后达到 ${currentLevel + 1} / 3 级` : '钱不够时不会消耗行动位',
-        disabled: !affordable
-      }]
+      title: currentStage?.label ?? upgrade.label,
+      copy: currentStage
+        ? `${currentStage.copy}账上现有 ${state.economy.cash} 元。`
+        : `这里仍被施工布盖着。建设会永久保留，账上现有 ${state.economy.cash} 元。`,
+      options
     };
   }
   return null;
@@ -1939,7 +2009,21 @@ function applyDecisionChoice(choiceId) {
   const previous = state;
   if (decisionAction === 'resolve-shortfall') state = resolveManagementShortfall(state, choiceId);
   if (decisionAction.startsWith('season-action:')) state = chooseSeasonAction(state, choiceId);
-  if (decisionAction.startsWith('season-project:')) state = buildSeasonProject(state, choiceId);
+  if (decisionAction.startsWith('season-project:')) {
+    const projectId = decisionAction.slice('season-project:'.length);
+    const levelBefore = state.season.projects[projectId];
+    state = choiceId.startsWith('visit:')
+      ? visitSeasonProject(state, choiceId.slice('visit:'.length))
+      : buildSeasonProject(state, choiceId);
+    if (state.season.projects[projectId] > levelBefore) {
+      recentProjectBuildId = projectId;
+      window.clearTimeout(constructionRevealTimer);
+      constructionRevealTimer = window.setTimeout(() => {
+        document.querySelector(`[data-construction-project="${projectId}"]`)?.classList.remove('is-revealing');
+        recentProjectBuildId = null;
+      }, reducedMotion.matches ? 0 : 1400);
+    }
+  }
   const changed = state !== previous;
   if (changed) {
     showToast(state.journal.at(-1)?.text);

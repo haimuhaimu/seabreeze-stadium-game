@@ -150,6 +150,132 @@ kbd {
 .wind-layer i:nth-child(3) { left: 54%; top: 30%; animation-delay: -4s; animation-duration: 10s; }
 .wind-layer i:nth-child(4) { left: 34%; top: 13%; animation-delay: -8s; animation-duration: 14s; }
 
+.construction-visuals {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.construction-visual {
+  position: absolute;
+  isolation: isolate;
+  left: var(--construction-x);
+  top: var(--construction-y);
+  width: var(--construction-width);
+  height: var(--construction-height);
+  overflow: hidden;
+  border: 2px solid rgb(26 67 79 / 72%);
+  border-radius: 8px;
+  background:
+    repeating-linear-gradient(126deg, rgb(185 214 216 / 0%) 0 16px, rgb(236 228 192 / 34%) 17px 21px, rgb(185 214 216 / 0%) 22px 38px),
+    rgb(53 105 119 / 70%);
+  box-shadow:
+    inset 0 0 0 2px rgb(225 236 226 / 18%),
+    0 4px 0 rgb(8 35 43 / 24%);
+  filter: saturate(.88);
+  transition: opacity 420ms var(--ease), transform 420ms var(--ease);
+}
+
+.construction-visual::before,
+.construction-visual::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.construction-visual::before {
+  inset: 7px;
+  border: 2px dashed rgb(238 225 185 / 55%);
+  border-radius: 5px;
+}
+
+.construction-visual::after {
+  left: 10%;
+  right: 10%;
+  bottom: 15%;
+  height: 3px;
+  background: #d5c18d;
+  box-shadow: 0 -18px 0 rgb(213 193 141 / 72%), 0 -36px 0 rgb(213 193 141 / 46%);
+  transform: rotate(-2deg);
+}
+
+.construction-visual[data-level="1"] {
+  background:
+    repeating-linear-gradient(126deg, transparent 0 24px, rgb(232 219 180 / 28%) 25px 28px, transparent 29px 50px),
+    rgb(53 105 119 / 46%);
+}
+
+.construction-visual[data-level="2"] {
+  border-style: dashed;
+  background: rgb(53 105 119 / 20%);
+  box-shadow: inset 0 0 0 2px rgb(225 236 226 / 12%);
+}
+
+.construction-visual[data-level="2"]::before { inset: 56% 6px 6px; }
+.construction-visual[data-level="2"]::after { bottom: 9%; box-shadow: none; }
+
+.construction-visual.is-complete {
+  overflow: visible;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  filter: none;
+}
+
+.construction-visual.is-complete::before {
+  inset: auto 7% 7% 7%;
+  height: 7px;
+  border: 0;
+  border-radius: 0;
+  background: repeating-linear-gradient(90deg, #d86151 0 11px, #f0cf82 11px 22px, #3f8791 22px 33px);
+  clip-path: polygon(0 0, 100% 0, 94% 100%, 86% 0, 76% 100%, 66% 0, 56% 100%, 46% 0, 36% 100%, 26% 0, 16% 100%, 6% 0);
+  opacity: .9;
+}
+
+.construction-visual.is-complete::after { display: none; }
+
+.construction-plaque {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  z-index: 2;
+  min-width: 76px;
+  padding: 5px 7px 4px;
+  border: 1px solid rgb(232 224 193 / 74%);
+  border-radius: 7px;
+  background: rgb(24 66 77 / 92%);
+  color: #edf5ed;
+  box-shadow: 0 3px 0 rgb(7 32 39 / 26%);
+  line-height: 1.05;
+  text-align: center;
+  white-space: nowrap;
+  transform: translateX(-50%) rotate(-1deg);
+}
+
+.construction-plaque small,
+.construction-plaque strong { display: block; }
+.construction-plaque small { color: #bedadd; font-size: 7px; font-weight: 800; }
+.construction-plaque strong { margin-top: 3px; font-size: 9px; }
+.construction-visual.is-complete .construction-plaque { border-color: #9f493e; background: #c95f4d; }
+.construction-visual.is-complete .construction-plaque small { color: #f9d9c4; }
+
+.construction-stands { transform: rotate(-.8deg); }
+.construction-clinic { transform: rotate(.6deg); }
+.construction-academy { transform: rotate(-.5deg); }
+.construction-market { transform: rotate(.7deg); }
+.construction-lights { transform: rotate(-.6deg); }
+
+.construction-visual.is-revealing { animation: construction-reveal 1.35s var(--ease) both; }
+
+@keyframes construction-reveal {
+  0% { opacity: .2; transform: translateY(8px) scale(.96); }
+  45% { opacity: 1; transform: translateY(-3px) scale(1.015); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
 .morning-layer,
 .shop-actors,
 .world-content-layer {
@@ -358,6 +484,9 @@ kbd {
   color: rgb(239 249 249 / 78%);
   font-size: 7px;
 }
+.season-project[data-built="true"] .mainline-marker::before { content: "可以一起使用"; }
+.season-project[data-visited="true"] .mainline-marker::before { content: "本轮已经来过"; }
+.season-project[data-build-available="false"][data-built="false"] { display: none; }
 .season-match .mainline-marker::before { content: "三项行动已完成"; color: #4e3d1e; }
 .season-event-target .mainline-marker::before { content: "这轮发生了一件事"; color: #6d4936; }
 
@@ -1502,6 +1631,8 @@ kbd {
 .match-options button:focus-visible { border-color: #b95748; background: rgb(255 255 255 / 82%); outline: 0; }
 .decision-options button:active,
 .match-options button:active { transform: translateY(1px) scale(.99); }
+.decision-options button:disabled,
+.match-options button:disabled { opacity: .48; cursor: not-allowed; }
 .decision-options strong,
 .decision-options small,
 .match-options strong,

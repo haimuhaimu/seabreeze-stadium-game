@@ -315,6 +315,43 @@ async function loadUnqualifiedSeasonFixture() {
   await waitFor('!document.querySelector("[data-season-summary]").hidden', 'The unqualified season summary did not restore');
 }
 
+async function loadLivingConstructionFixture() {
+  await evaluate(`(async () => {
+    const { writeSave } = await import('./save-game.js');
+    const game = window.__integratedDayDebug.getState();
+    game.dayIndex = 17;
+    game.phase = 'morning';
+    game.minute = 610;
+    game.world.mapId = 'stadium';
+    game.season.active = true;
+    game.season.seasonNumber = 2;
+    game.season.roundIndex = 0;
+    game.season.projects = { stands: 3, clinic: 2, academy: 1, market: 2, lights: 0 };
+    game.season.week = {
+      actions: [],
+      talkedNpcIds: [],
+      npcResponses: {},
+      helpTags: [],
+      memoryNpcIds: [],
+      visitedProjectIds: [],
+      eventId: null,
+      eventChoiceId: null,
+      eventTag: null,
+      roundComplete: false,
+      result: null
+    };
+    game.season.match = null;
+    game.season.seasonComplete = false;
+    game.season.eliteQualified = false;
+    game.season.goals = null;
+    writeSave(localStorage, game, { x: 52, y: 68 }, 'stadium');
+    return true;
+  })()`);
+  await navigate();
+  await click('[data-continue]');
+  await waitFor('window.__integratedDayDebug.getState().season.projects.stands === 3', 'The mixed construction fixture did not restore');
+}
+
 async function completeEpisodeDay(dayIndex) {
   assert(await evaluate(`window.__integratedDayDebug.getState().dayIndex === ${dayIndex}`), `Episode day ${dayIndex} did not begin`);
   await waitFor('!document.querySelector("[data-end-management-day]").hidden', 'Management day cannot be closed');
@@ -713,6 +750,8 @@ async function testThreeDayLoop() {
   await waitFor('window.__integratedDayDebug.getState().season.active && window.__integratedDayDebug.getState().dayIndex === 17', 'The Haifeng league did not begin');
   assert(!await evaluate('document.querySelector("[data-season-docket]").hidden'), 'The persistent league docket is missing');
   assert((await text('[data-season-actions]')) === '行动 0 / 3', 'The first league round does not start with three open actions');
+  assert(await evaluate('document.querySelectorAll("[data-construction-project]").length === 4'), 'The stadium does not show its four construction regions');
+  assert(await evaluate('[...document.querySelectorAll("[data-construction-project]")].every(element => element.dataset.level === "0")'), 'A new league does not begin with visible unbuilt construction regions');
 
   await walkAndWait('npc-lin-chuan', '!document.querySelector("[data-season-conversation]").hidden');
   assert((await text('[data-season-npc-name]')) === '林川', 'The recurring NPC conversation opened the wrong person');
@@ -749,6 +788,20 @@ async function testThreeDayLoop() {
   await walkAndWait('season-project-stands', '!document.querySelector("[data-decision-panel]").hidden');
   await click('[data-decision-choice="stands"]');
   assert(await evaluate('window.__integratedDayDebug.getState().season.projects.stands === 1'), 'The first permanent stand upgrade was not built');
+  assert(await evaluate('document.querySelector("[data-construction-project=stands]").dataset.level === "1"'), 'The stand construction layer did not change immediately after building');
+  assert(await evaluate('Boolean(document.querySelector("[data-object=season-project-stands]"))'), 'The built stand disappeared from the physical world');
+  assert(await evaluate('document.querySelector("[data-object=npc-lin-chuan]").style.getPropertyValue("--x") === "25%"'), 'Lin Chuan did not move beside the built stand');
+  const beforeFacilityVisit = await evaluate('({ minute: window.__integratedDayDebug.getState().minute, actions: window.__integratedDayDebug.getState().season.week.actions.length, bond: window.__integratedDayDebug.getState().season.relationships["lin-chuan"] })');
+  await walkAndWait('season-project-stands', '!document.querySelector("[data-decision-panel]").hidden');
+  assert(await evaluate('Boolean(document.querySelector("[data-decision-choice=\\"visit:stands\\"]"))'), 'The built stand does not offer a free facility visit');
+  await click('[data-decision-choice="visit:stands"]');
+  assert(await evaluate(`(() => {
+    const state = window.__integratedDayDebug.getState();
+    return state.minute === ${beforeFacilityVisit.minute + 12}
+      && state.season.week.actions.length === ${beforeFacilityVisit.actions}
+      && state.season.relationships['lin-chuan'] === ${beforeFacilityVisit.bond + 1}
+      && state.season.week.visitedProjectIds.includes('stands');
+  })()`), 'The free stand visit spent the wrong resource or failed to strengthen the relationship');
   assert((await text('[data-season-actions]')) === '行动 3 / 3', 'The weekly action counter did not fill');
 
   assert(!await evaluate('Boolean(document.querySelector("[data-object=season-match-center]"))'), 'The match opened before the round incident was answered');
@@ -830,13 +883,44 @@ async function testThreeDayLoop() {
   await click('[data-season-next]');
   await waitFor('window.__integratedDayDebug.getState().season.roundIndex === 1', 'The second league round did not open');
   assert(await evaluate('window.__integratedDayDebug.getState().season.projects.stands === 1'), 'Construction did not persist into the next round');
-  assert(await evaluate('window.__integratedDayDebug.getState().season.relationships["lin-chuan"] === 1'), 'NPC bonds did not persist into the next round');
+  assert(await evaluate('window.__integratedDayDebug.getState().season.relationships["lin-chuan"] === 2'), 'Construction and NPC bonds did not persist into the next round');
   assert(await evaluate('window.__integratedDayDebug.getState().season.relationships.xiaoman === 2'), 'The incident follow-up bond did not persist into the next round');
   await walkAndWait('to-training', 'window.__integratedDayDebug.getMapId() === "training"');
   await walkAndWait('npc-xiaoman', '!document.querySelector("[data-season-conversation]").hidden');
   assert((await text('[data-season-memory-source]')).includes('还记得第 1 轮'), 'The previous incident disappeared before the next decision');
   assert((await text('[data-season-npc-copy]')).includes('那道白线'), 'Xiaoman forgot the previous incident in the next round');
   await click('[data-season-conversation-close]');
+
+  await loadLivingConstructionFixture();
+  const construction = await evaluate(`({
+    levels: Object.fromEntries([...document.querySelectorAll('[data-construction-project]')].map(element => [element.dataset.constructionProject, Number(element.dataset.level)])),
+    labels: [...document.querySelectorAll('[data-construction-project]')].map(element => element.textContent.trim()),
+    auntMap: Boolean(document.querySelector('[data-object="npc-aunt-xu"]')),
+    xiaomanMap: Boolean(document.querySelector('[data-object="npc-xiaoman"]')),
+    maxTarget: Boolean(document.querySelector('[data-object="season-project-stands"]')),
+    overflow: document.documentElement.scrollWidth > innerWidth
+  })`);
+  assert(JSON.stringify(construction.levels) === JSON.stringify({ stands: 3, clinic: 2, market: 2, lights: 0 }), `Mixed stadium construction levels are wrong: ${JSON.stringify(construction)}`);
+  assert(construction.labels.some(label => label.includes('家庭看台')) && construction.labels.some(label => label.includes('待开工')), 'Construction layers do not name complete and unbuilt stages');
+  assert(construction.auntMap && construction.xiaomanMap, 'Built facilities did not bring Aunt Xu and Xiaoman into the stadium');
+  assert(construction.maxTarget, 'A max-level facility cannot be revisited');
+  assert(!construction.overflow, 'Mixed construction world overflows on desktop');
+  await capture('construction-desktop');
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 2,
+    mobile: true
+  });
+  await sleep(250);
+  assert(!await evaluate('document.documentElement.scrollWidth > innerWidth'), 'The living construction world overflows on mobile');
+  await capture('construction-mobile');
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 1440,
+    height: 900,
+    deviceScaleFactor: 1,
+    mobile: false
+  });
 
   await loadUnqualifiedSeasonFixture();
   assert(!(await text('[data-season-summary-title]')).includes('精英邀请赛资格'), 'An unqualified season incorrectly received an elite invitation');
@@ -901,6 +985,7 @@ try {
   console.log('PASS deterministic callback match and character settlement');
   console.log('PASS naming-rights week, free-time loop, public vote, and sign reveal');
   console.log('PASS repeatable league round, authored incident, remembered NPC response, construction, match, and standings');
+  console.log('PASS visible construction stages, facility visits, and NPC relocation');
   console.log('PASS qualified elite invitation, preparation callbacks, permanent result, and next season');
   assert(pageErrors.length === 0, `Browser errors: ${pageErrors.join(' | ')}`);
   console.log('PASS browser console');
