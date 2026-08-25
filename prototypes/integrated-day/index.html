@@ -7,7 +7,7 @@
   <meta name="theme-color" content="#14221b">
   <title>海风球场：安若童的联赛生活</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="./styles.css?v=7">
+  <link rel="stylesheet" href="./styles.css?v=8">
 </head>
 <body>
   <main class="game" data-phase="morning">
@@ -407,6 +407,50 @@
         </div>
       </section>
 
+      <section class="elite-panel" data-elite-panel hidden role="dialog" aria-modal="true" aria-label="精英邀请赛">
+        <div class="elite-heading">
+          <div>
+            <span data-elite-kicker>东海岸精英邀请赛</span>
+            <h1 data-elite-title>球场收到了一封正式邀请</h1>
+          </div>
+          <button data-elite-close type="button">回到球场</button>
+        </div>
+        <div class="elite-opponent-card">
+          <span class="npc-sprite npc-qiaoqiao" aria-hidden="true"></span>
+          <div>
+            <small>本届对手</small>
+            <strong data-elite-opponent>鹤岭青训联队</strong>
+            <p data-elite-opponent-copy></p>
+          </div>
+        </div>
+        <div data-elite-invitation>
+          <p class="elite-qualification" data-elite-qualification></p>
+          <div class="elite-preparations" data-elite-preparations></div>
+          <button class="elite-skip" data-elite-skip type="button">本届不参加，进入下一赛季</button>
+        </div>
+        <div data-elite-match hidden>
+          <div class="elite-scoreline">
+            <span>海风队</span>
+            <strong data-elite-score>0 : 2</strong>
+            <span>鹤岭</span>
+          </div>
+          <div class="elite-moment">
+            <small data-elite-minute>第 17 分钟</small>
+            <h2 data-elite-moment-title>第一脚怎么交出去</h2>
+            <p data-elite-moment-copy></p>
+          </div>
+          <div class="elite-choices" data-elite-choices></div>
+        </div>
+        <div class="elite-result" data-elite-result hidden>
+          <span>这次结果会永久保留</span>
+          <h2 data-elite-result-title>击败精英队</h2>
+          <strong class="elite-final-score" data-elite-result-score>海风 2 : 1 鹤岭</strong>
+          <p data-elite-result-copy></p>
+          <div class="elite-rewards" data-elite-rewards></div>
+          <button data-elite-next type="button">带着结果进入下一赛季</button>
+        </div>
+      </section>
+
       <section class="start-card" data-start-card hidden aria-label="海风球场存档">
         <span>完整故事与海风联赛已经开放</span>
         <h1>从场边小店，走进一座不会轻易倒下的球场</h1>
@@ -420,6 +464,6 @@
       </section>
     </section>
   </main>
-  <script type="module" src="./game.js?v=7"></script>
+  <script type="module" src="./game.js?v=8"></script>
 </body>
 </html>

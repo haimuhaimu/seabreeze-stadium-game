@@ -42,6 +42,8 @@ import {
   startSecondWeeklyMatch,
   resolveSecondWeeklyMatchChoice,
   beginLeagueSeason,
+  chooseEliteMatchChoice,
+  chooseElitePreparation,
   chooseSeasonAction,
   chooseSeasonEventDecision,
   chooseSeasonNpcMemory,
@@ -76,7 +78,7 @@ import {
   getNamingDay,
   getNamingScene
 } from './naming-rights-content.js';
-import { getSeasonMatchMoment, getSeasonGoalStatus, getStandings } from './season-state.js';
+import { getSeasonEliteMoment, getSeasonMatchMoment, getSeasonGoalStatus, getStandings } from './season-state.js';
 import {
   SEASON_ACTIONS,
   SEASON_GOALS,
@@ -87,6 +89,7 @@ import {
   getSeasonRound
 } from './season-content.js';
 import { SEASON_EVENTS, getSeasonEvent, getSeasonEventChoice } from './season-events.js';
+import { ELITE_OPPONENT, ELITE_PREPARATIONS, ELITE_RESULTS } from './elite-content.js';
 
 const root = document.querySelector('.game');
 const viewport = document.querySelector('[data-scene]');
@@ -116,6 +119,7 @@ const seasonConversation = document.querySelector('[data-season-conversation]');
 const seasonEventPanel = document.querySelector('[data-season-event]');
 const seasonBoard = document.querySelector('[data-season-board]');
 const seasonSummary = document.querySelector('[data-season-summary]');
+const elitePanel = document.querySelector('[data-elite-panel]');
 const seasonDocket = document.querySelector('[data-season-docket]');
 const stadiumSign = document.querySelector('[data-stadium-sign]');
 const summaryDim = document.querySelector('[data-summary-dim]');
@@ -172,6 +176,7 @@ let weekSummaryDismissed = false;
 let activeSeasonNpcId = null;
 let activeSeasonEventId = null;
 let seasonBoardOpen = false;
+let elitePanelOpen = false;
 const pressedKeys = new Set();
 
 function isLeagueSeason() {
@@ -1433,7 +1438,7 @@ function renderSeasonBoard() {
 }
 
 function renderSeasonSummary() {
-  const active = isLeagueSeason() && state.phase === 'complete' && state.season.week.roundComplete && !seasonBoardOpen;
+  const active = isLeagueSeason() && state.phase === 'complete' && state.season.week.roundComplete && !seasonBoardOpen && !elitePanelOpen;
   seasonSummary.hidden = !active;
   if (!active) return;
   const result = state.season.week.result;
@@ -1464,8 +1469,80 @@ function renderSeasonSummary() {
     ['账上现金', `${state.economy.cash} 元`]
   ].map(([label, value]) => `<div><span>${label}</span><strong>${value}</strong></div>`).join('');
   const nextButton = document.querySelector('[data-season-next]');
-  nextButton.textContent = seasonComplete ? '带着这些进入下一赛季' : `进入第 ${state.season.roundIndex + 2} 轮`;
+  nextButton.textContent = seasonComplete && goals.eliteQualified
+    ? state.season.elite.status === 'invited'
+      ? '接受精英邀请'
+      : state.season.elite.status === 'match'
+        ? '继续精英邀请赛'
+        : '查看精英赛结果'
+    : seasonComplete
+      ? '带着这些进入下一赛季'
+      : `进入第 ${state.season.roundIndex + 2} 轮`;
   nextButton.dataset.elite = String(Boolean(goals.eliteQualified));
+}
+
+function eliteCallbackCopy(choice) {
+  if (!choice.callback) return '这是此刻的取舍，没有过去成果自动回应。';
+  const label = choice.callback === 'ranking'
+    ? '联赛前四'
+    : choice.callback === 'construction'
+      ? '六级球场建设'
+      : ELITE_PREPARATIONS[choice.callback.replace('preparation:', '')]?.label ?? '赛前准备';
+  return choice.callbackReady ? `${label}会回应这次选择。` : `${label}没有在赛前准备好。`;
+}
+
+function renderElitePanel() {
+  const elite = state.season?.elite;
+  const active = elitePanelOpen && isLeagueSeason() && state.season.seasonComplete && ['invited', 'match', 'complete'].includes(elite?.status);
+  elitePanel.hidden = !active;
+  if (!active) return;
+
+  const invitation = document.querySelector('[data-elite-invitation]');
+  const match = document.querySelector('[data-elite-match]');
+  const result = document.querySelector('[data-elite-result]');
+  invitation.hidden = elite.status !== 'invited';
+  match.hidden = elite.status !== 'match';
+  result.hidden = elite.status !== 'complete';
+  document.querySelector('[data-elite-opponent]').textContent = ELITE_OPPONENT.name;
+  document.querySelector('[data-elite-opponent-copy]').textContent = ELITE_OPPONENT.copy;
+  document.querySelector('[data-elite-title]').textContent = elite.status === 'invited'
+    ? '球场收到了一封正式邀请'
+    : elite.status === 'match'
+      ? '海风第一次站进精英赛'
+      : '这场比赛已经写进记录';
+
+  if (elite.status === 'invited') {
+    const rank = seasonRank();
+    const construction = Object.values(state.season.projects).reduce((sum, value) => sum + value, 0);
+    document.querySelector('[data-elite-qualification]').textContent = `联赛第 ${rank} 名，球场建设 ${construction} 级。两项条件一起换来了这封邀请。先决定赛前最认真做哪一件事。`;
+    document.querySelector('[data-elite-preparations]').innerHTML = Object.values(ELITE_PREPARATIONS).map(preparation => (
+      `<button type="button" data-elite-preparation="${preparation.id}"><strong>${preparation.label}</strong><span>${preparation.copy}</span><small>${preparation.callbackLabel}</small></button>`
+    )).join('');
+  }
+
+  if (elite.status === 'match') {
+    const moment = getSeasonEliteMoment(state.season);
+    document.querySelector('[data-elite-score]').textContent = `${elite.match.homeGoals} : ${elite.match.awayGoals}`;
+    document.querySelector('[data-elite-minute]').textContent = moment.minute;
+    document.querySelector('[data-elite-moment-title]').textContent = moment.title;
+    document.querySelector('[data-elite-moment-copy]').textContent = moment.copy;
+    document.querySelector('[data-elite-choices]').innerHTML = moment.choices.map(choice => (
+      `<button type="button" data-elite-choice="${choice.id}" class="${choice.callbackReady ? 'is-ready' : ''}"><strong>${choice.label}</strong><span>${choice.copy}</span><small>${eliteCallbackCopy(choice)}</small></button>`
+    )).join('');
+  }
+
+  if (elite.status === 'complete') {
+    const content = ELITE_RESULTS[elite.result.id];
+    document.querySelector('[data-elite-score]').textContent = `${elite.result.homeGoals} : ${elite.result.awayGoals}`;
+    document.querySelector('[data-elite-result-title]').textContent = content.label;
+    document.querySelector('[data-elite-result-score]').textContent = `海风 ${elite.result.homeGoals} : ${elite.result.awayGoals} 鹤岭`;
+    document.querySelector('[data-elite-result-copy]').textContent = content.copy;
+    document.querySelector('[data-elite-rewards]').innerHTML = [
+      ['奖金', `+${content.effects.cash} 元`],
+      ['凝聚', `+${content.effects.cohesion}`],
+      ['社区', `+${content.effects.community}`]
+    ].map(([label, value]) => `<div><span>${label}</span><strong>${value}</strong></div>`).join('');
+  }
 }
 
 function renderManagementControls() {
@@ -1672,7 +1749,7 @@ function renderTraining() {
   root.classList.toggle('training-active', trainingActive);
   trainingLayer.hidden = !trainingActive;
   const hearingActive = Boolean(state.dayIndex === 9 && state.management?.matchResult && !state.episode.hearingChoice);
-  const managementModal = Boolean(decisionAction || storySceneId || activeEpisodeActivity || activeFreeActivity || hearingActive || activeSeasonNpcId || activeSeasonEventId || seasonBoardOpen || !seasonSummary.hidden);
+  const managementModal = Boolean(decisionAction || storySceneId || activeEpisodeActivity || activeFreeActivity || hearingActive || activeSeasonNpcId || activeSeasonEventId || seasonBoardOpen || elitePanelOpen || !seasonSummary.hidden);
   touchControls.hidden = trainingActive || state.phase !== 'morning' || managementModal;
   touchAction.hidden = trainingActive || state.phase !== 'morning' || managementModal;
   if (managementModal) prompt.hidden = true;
@@ -1716,6 +1793,7 @@ function renderModals() {
   renderSeasonEvent();
   renderSeasonBoard();
   renderSeasonSummary();
+  renderElitePanel();
   renderStartCard();
   summaryDim.hidden = summary.hidden
     && chapterSummary.hidden
@@ -1729,6 +1807,7 @@ function renderModals() {
     && seasonEventPanel.hidden
     && seasonBoard.hidden
     && seasonSummary.hidden
+    && elitePanel.hidden
     && startCard.hidden;
 }
 
@@ -2135,12 +2214,14 @@ function advanceMovement(deltaSeconds, timestamp) {
     || activeSeasonNpcId
     || activeSeasonEventId
     || seasonBoardOpen
+    || elitePanelOpen
     || !hearingPanel.hidden
     || state.phase !== 'morning'
     || !summary.hidden
     || !chapterSummary.hidden
     || (!weekSummary.hidden && !weekSummaryDismissed)
-    || !seasonSummary.hidden) {
+    || !seasonSummary.hidden
+    || !elitePanel.hidden) {
     moving = false;
     player.classList.remove('moving');
     player.dataset.frame = '0';
@@ -2363,6 +2444,7 @@ function continueLeagueSeason() {
   activeSeasonNpcId = null;
   activeSeasonEventId = null;
   seasonBoardOpen = false;
+  elitePanelOpen = false;
   notes.hidden = true;
   persist();
   render();
@@ -2705,7 +2787,54 @@ document.querySelector('[data-season-summary-board]').addEventListener('click', 
   render();
 });
 
-document.querySelector('[data-season-next]').addEventListener('click', continueLeagueSeason);
+document.querySelector('[data-season-next]').addEventListener('click', () => {
+  if (state.season?.seasonComplete && state.season.eliteQualified && ['invited', 'match', 'complete'].includes(state.season.elite?.status)) {
+    elitePanelOpen = true;
+    render();
+    return;
+  }
+  continueLeagueSeason();
+});
+
+document.querySelector('[data-elite-preparations]').addEventListener('click', event => {
+  const button = event.target.closest('[data-elite-preparation]');
+  if (!button) return;
+  const previous = state;
+  state = chooseElitePreparation(state, button.dataset.elitePreparation);
+  if (state !== previous && state.season.elite.status === 'match') {
+    showToast(state.journal.at(-1)?.text);
+    persist();
+  }
+  render();
+});
+
+document.querySelector('[data-elite-choices]').addEventListener('click', event => {
+  const button = event.target.closest('[data-elite-choice]');
+  if (!button) return;
+  const previous = state;
+  state = chooseEliteMatchChoice(state, button.dataset.eliteChoice);
+  if (state !== previous) {
+    showToast(state.journal.at(-1)?.text);
+    persist();
+  }
+  render();
+});
+
+document.querySelector('[data-elite-close]').addEventListener('click', () => {
+  elitePanelOpen = false;
+  render();
+  viewport.focus();
+});
+
+document.querySelector('[data-elite-skip]').addEventListener('click', () => {
+  elitePanelOpen = false;
+  continueLeagueSeason();
+});
+
+document.querySelector('[data-elite-next]').addEventListener('click', () => {
+  elitePanelOpen = false;
+  continueLeagueSeason();
+});
 
 document.querySelector('[data-week-restart]').addEventListener('click', event => {
   if (!weekResetArmed) {

@@ -228,6 +228,51 @@ async function assertInsideViewport(selector) {
   assert(result.left >= -1 && result.top >= -1 && result.right <= result.width + 1 && result.bottom <= result.height + 1, `${selector} leaves the viewport`);
 }
 
+async function loadQualifiedEliteFixture() {
+  const prepared = await evaluate(`(async () => {
+    const { writeSave } = await import('./save-game.js');
+    const { offerEliteInvitation } = await import('./elite-state.js');
+    const game = window.__integratedDayDebug.getState();
+    game.dayIndex = 23;
+    game.phase = 'complete';
+    game.minute = 1100;
+    game.world.mapId = 'stadium';
+    game.season.active = true;
+    game.season.seasonNumber = 1;
+    game.season.roundIndex = 6;
+    game.season.projects = { stands: 3, clinic: 3, academy: 0, market: 0, lights: 0 };
+    game.season.week = {
+      actions: ['train-attack', 'community-open', 'train-defense'],
+      talkedNpcIds: [],
+      npcResponses: {},
+      helpTags: ['community'],
+      memoryNpcIds: [],
+      eventId: null,
+      eventChoiceId: null,
+      eventTag: null,
+      roundComplete: true,
+      result: { opponentId: 'harbor-workers', homeGoals: 2, awayGoals: 1, points: 3 }
+    };
+    game.season.match = null;
+    game.season.seasonComplete = true;
+    game.season.eliteQualified = true;
+    game.season.goals = {
+      ranking: { complete: true, current: 2, target: 4 },
+      construction: { complete: true, current: 6, target: 6 },
+      people: { complete: false, current: 2, target: 3 },
+      finance: { complete: false, current: game.economy.cash, target: 180 },
+      eliteQualified: true
+    };
+    game.season.elite = offerEliteInvitation(game.season.elite, 1);
+    writeSave(localStorage, game, { x: 52, y: 68 }, 'stadium');
+    return { cash: game.economy.cash, cohesion: game.roster.cohesion, community: game.communitySupport };
+  })()`);
+  await navigate();
+  await click('[data-continue]');
+  await waitFor('!document.querySelector("[data-season-summary]").hidden', 'The qualified season summary did not restore');
+  return prepared;
+}
+
 async function completeEpisodeDay(dayIndex) {
   assert(await evaluate(`window.__integratedDayDebug.getState().dayIndex === ${dayIndex}`), `Episode day ${dayIndex} did not begin`);
   await waitFor('!document.querySelector("[data-end-management-day]").hidden', 'Management day cannot be closed');
@@ -750,6 +795,39 @@ async function testThreeDayLoop() {
   assert((await text('[data-season-memory-source]')).includes('还记得第 1 轮'), 'The previous incident disappeared before the next decision');
   assert((await text('[data-season-npc-copy]')).includes('那道白线'), 'Xiaoman forgot the previous incident in the next round');
   await click('[data-season-conversation-close]');
+
+  const eliteBefore = await loadQualifiedEliteFixture();
+  assert((await text('[data-season-summary-title]')).includes('精英邀请赛资格'), 'The qualified season summary does not announce the invitation');
+  assert((await text('[data-season-next]')) === '接受精英邀请', 'The qualified season does not offer a playable elite finale');
+  await click('[data-season-next]');
+  await waitFor('!document.querySelector("[data-elite-panel]").hidden', 'The elite invitation panel did not open');
+  assert((await text('[data-elite-opponent]')) === '鹤岭青训联队', 'The elite invitation opened the wrong opponent');
+  assert(await evaluate('document.querySelectorAll("[data-elite-preparation]").length === 3'), 'The elite invitation does not offer three preparation routes');
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 2,
+    mobile: true
+  });
+  await sleep(250);
+  assert(!await evaluate('document.documentElement.scrollWidth > innerWidth'), 'The elite invitation overflows on mobile');
+  await assertInsideViewport('[data-elite-panel]');
+  await capture('elite-invitation-mobile');
+  await click('[data-elite-preparation="shared-plan"]');
+  assert(await evaluate('window.__integratedDayDebug.getState().season.elite.status === "match"'), 'The elite preparation did not start the match');
+  assert((await text('[data-elite-score]')) === '0 : 2', 'The elite match did not begin from its authored deficit');
+  for (const choiceId of ['use-league-shape', 'open-built-route', 'follow-shared-plan']) {
+    await click(`[data-elite-choice="${choiceId}"]`);
+  }
+  assert(await evaluate('window.__integratedDayDebug.getState().season.elite.result.id === "champion"'), 'The fully prepared elite route did not win');
+  assert((await text('[data-elite-score]')) === '2 : 1', 'The elite final score is not visible');
+  assert(await evaluate(`window.__integratedDayDebug.getState().economy.cash === ${eliteBefore.cash + 160}`), 'The elite prize was not paid');
+  assert(await evaluate(`window.__integratedDayDebug.getState().roster.cohesion === ${Math.min(100, eliteBefore.cohesion + 4)}`), 'The elite cohesion reward was not applied');
+  assert(await evaluate(`window.__integratedDayDebug.getState().communitySupport === ${Math.min(100, eliteBefore.community + 8)}`), 'The elite community reward was not applied');
+  assert((await text('[data-elite-result-title]')) === '击败精英队', 'The elite result does not show the permanent outcome');
+  await click('[data-elite-next]');
+  await waitFor('window.__integratedDayDebug.getState().season.seasonNumber === 2', 'The elite finale did not open the next season');
+  assert(await evaluate('window.__integratedDayDebug.getState().season.elite.bestResultId === "champion"'), 'The elite best result did not persist');
 }
 
 let exitCode = 0;
@@ -775,6 +853,7 @@ try {
   console.log('PASS deterministic callback match and character settlement');
   console.log('PASS naming-rights week, free-time loop, public vote, and sign reveal');
   console.log('PASS repeatable league round, authored incident, remembered NPC response, construction, match, and standings');
+  console.log('PASS qualified elite invitation, preparation callbacks, permanent result, and next season');
   assert(pageErrors.length === 0, `Browser errors: ${pageErrors.join(' | ')}`);
   console.log('PASS browser console');
 } catch (error) {
