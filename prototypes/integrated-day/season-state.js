@@ -9,6 +9,7 @@ import {
   getSeasonProject,
   getSeasonRound
 } from './season-content.js';
+import { getSeasonEvent, getSeasonEventChoice } from './season-events.js';
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const PROJECT_IDS = Object.freeze(Object.keys(SEASON_PROJECTS));
@@ -19,6 +20,9 @@ const emptyWeek = () => ({
   talkedNpcIds: [],
   npcResponses: {},
   helpTags: [],
+  eventId: null,
+  eventChoiceId: null,
+  eventTag: null,
   roundComplete: false,
   result: null
 });
@@ -47,6 +51,7 @@ export function createSeasonState() {
     standings: emptyStandings(),
     match: null,
     roundHistory: [],
+    eventHistory: [],
     goals: null,
     seasonComplete: false,
     eliteQualified: false
@@ -58,10 +63,13 @@ export function cloneSeasonState(state) {
     ...state,
     week: {
       ...state.week,
-      actions: [...state.week.actions],
-      talkedNpcIds: [...state.week.talkedNpcIds],
-      npcResponses: { ...state.week.npcResponses },
-      helpTags: [...state.week.helpTags],
+      actions: [...(state.week.actions ?? [])],
+      talkedNpcIds: [...(state.week.talkedNpcIds ?? [])],
+      npcResponses: { ...(state.week.npcResponses ?? {}) },
+      helpTags: [...(state.week.helpTags ?? [])],
+      eventId: state.week.eventId ?? null,
+      eventChoiceId: state.week.eventChoiceId ?? null,
+      eventTag: state.week.eventTag ?? null,
       result: state.week.result ? { ...state.week.result } : null
     },
     projects: { ...state.projects },
@@ -74,6 +82,7 @@ export function cloneSeasonState(state) {
       snapshot: { ...state.match.snapshot }
     } : null,
     roundHistory: state.roundHistory.map(entry => ({ ...entry })),
+    eventHistory: (state.eventHistory ?? []).map(entry => ({ ...entry })),
     goals: state.goals ? Object.fromEntries(Object.entries(state.goals).map(([key, value]) => [key, { ...value }])) : null
   };
 }
@@ -109,6 +118,31 @@ export function recordSeasonNpcTalk(state, npcId, responseId) {
   next.week.npcResponses[npcId] = responseId;
   if (!next.week.helpTags.includes(response.help)) next.week.helpTags.push(response.help);
   next.relationships[npcId] = clamp(next.relationships[npcId] + response.bond, 0, 5);
+  return next;
+}
+
+export function resolveSeasonEvent(state, eventId, choiceId) {
+  assertPlayableWeek(state);
+  if (state.week.eventChoiceId) throw new Error('Season event already resolved this round');
+  const expected = getSeasonEvent(state.roundIndex, state.seasonNumber || 1);
+  if (eventId !== expected.id) throw new Error('Season event is not for the current round');
+  const selected = getSeasonEventChoice(eventId, choiceId);
+  const next = cloneSeasonState(state);
+  next.week.eventId = eventId;
+  next.week.eventChoiceId = choiceId;
+  next.week.eventTag = selected.tag;
+  if (!next.week.helpTags.includes(selected.tag)) next.week.helpTags.push(selected.tag);
+  for (const [npcId, delta] of Object.entries(selected.relationships)) {
+    if (!Object.hasOwn(next.relationships, npcId)) throw new TypeError('Unknown season event relationship');
+    next.relationships[npcId] = clamp(next.relationships[npcId] + delta, 0, 5);
+  }
+  next.eventHistory.push({
+    seasonNumber: next.seasonNumber,
+    round: next.roundIndex + 1,
+    eventId,
+    choiceId,
+    resultCopy: selected.resultCopy
+  });
   return next;
 }
 
@@ -151,6 +185,7 @@ export function canStartSeasonMatch(state) {
     && !state.seasonComplete
     && !state.week.roundComplete
     && state.week.actions.length === 3
+    && Boolean(state.week.eventChoiceId)
     && !state.match
   );
 }

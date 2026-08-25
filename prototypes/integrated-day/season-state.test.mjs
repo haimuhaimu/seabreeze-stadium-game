@@ -4,6 +4,7 @@ import {
   advanceSeasonRound,
   beginSeason,
   canStartSeasonMatch,
+  cloneSeasonState,
   createSeasonState,
   getProjectUpgrade,
   getSeasonGoalStatus,
@@ -11,12 +12,14 @@ import {
   getStandings,
   recordSeasonAction,
   recordSeasonNpcTalk,
+  resolveSeasonEvent,
   resolveSeasonMatchMoment,
   settleSeasonRound,
   startNextSeason,
   startSeasonMatch,
   upgradeSeasonProject
 } from './season-state.js';
+import { getSeasonEvent } from './season-events.js';
 
 const strongSnapshot = Object.freeze({ attack: 62, defense: 60, cohesion: 61, facility: 68, cash: 220 });
 const weakSnapshot = Object.freeze({ attack: 44, defense: 43, cohesion: 42, facility: 40, cash: 70 });
@@ -26,6 +29,8 @@ test('a new season has eight empty standings rows and persistent progression slo
   assert.equal(season.active, false);
   assert.equal(season.projects.stands, 0);
   assert.equal(season.relationships['coach-guo'], 0);
+  assert.equal(season.week.eventChoiceId, null);
+  assert.deepEqual(season.eventHistory, []);
   const active = beginSeason(season);
   assert.equal(active.active, true);
   assert.equal(active.seasonNumber, 1);
@@ -47,9 +52,47 @@ test('weekly work stops after exactly three distinct actions', () => {
   for (const id of ['train-attack', 'community-open', 'maintenance']) {
     season = recordSeasonAction(season, id);
   }
+  assert.equal(canStartSeasonMatch(season), false);
+  const event = getSeasonEvent(0, 1);
+  season = resolveSeasonEvent(season, event.id, event.choices[0].id);
   assert.equal(canStartSeasonMatch(season), true);
   assert.throws(() => recordSeasonAction(season, 'shop-day'), /three actions/i);
   assert.throws(() => recordSeasonAction(season, 'maintenance'), /already completed/i);
+});
+
+test('an incident is free, changes relationships, and is recorded once for later rounds', () => {
+  let season = beginSeason(createSeasonState());
+  season.relationships.xiaoman = 5;
+  season.relationships['coach-guo'] = 0;
+  season = resolveSeasonEvent(season, 'shared-pitch', 'youth-leads');
+  assert.equal(season.week.actions.length, 0);
+  assert.equal(season.week.eventId, 'shared-pitch');
+  assert.equal(season.week.eventChoiceId, 'youth-leads');
+  assert.equal(season.week.eventTag, 'youth');
+  assert.equal(season.relationships.xiaoman, 5);
+  assert.equal(season.relationships['coach-guo'], 0);
+  assert.ok(season.week.helpTags.includes('youth'));
+  assert.deepEqual(season.eventHistory[0], {
+    seasonNumber: 1,
+    round: 1,
+    eventId: 'shared-pitch',
+    choiceId: 'youth-leads',
+    resultCopy: getSeasonEvent(0, 1).choices[2].resultCopy
+  });
+  assert.throws(() => resolveSeasonEvent(season, 'shared-pitch', 'share-half'), /already resolved/i);
+});
+
+test('old version five season state normalizes missing incident fields', () => {
+  const legacy = beginSeason(createSeasonState());
+  delete legacy.week.eventId;
+  delete legacy.week.eventChoiceId;
+  delete legacy.week.eventTag;
+  delete legacy.eventHistory;
+  const normalized = cloneSeasonState(legacy);
+  assert.equal(normalized.week.eventId, null);
+  assert.equal(normalized.week.eventChoiceId, null);
+  assert.equal(normalized.week.eventTag, null);
+  assert.deepEqual(normalized.eventHistory, []);
 });
 
 test('construction has three persistent levels and consumes a work action only when upgraded', () => {
@@ -75,6 +118,7 @@ test('a prepared match remembers weekly work, construction, and people', () => {
   season = recordSeasonAction(season, 'community-open');
   season = upgradeSeasonProject(season, 'stands');
   season = recordSeasonNpcTalk(season, 'coach-guo', 'solve');
+  season = resolveSeasonEvent(season, 'shared-pitch', 'share-half');
   season = startSeasonMatch(season, strongSnapshot);
   assert.equal(getSeasonMatchMoment(season).choices.find(choice => choice.id === 'use-attack-work').callbackReady, true);
   season = resolveSeasonMatchMoment(season, 'use-attack-work');
@@ -86,6 +130,8 @@ test('a prepared match remembers weekly work, construction, and people', () => {
 });
 
 function playRound(season, prepared) {
+  const event = getSeasonEvent(season.roundIndex, season.seasonNumber);
+  season = resolveSeasonEvent(season, event.id, prepared ? event.choices[0].id : event.choices[2].id);
   const actions = prepared
     ? ['train-attack', 'community-open', 'train-defense']
     : ['rest', 'shop-day', 'maintenance'];
@@ -136,6 +182,7 @@ test('goals are readable and a new season preserves projects and relationships',
   assert.equal(next.roundIndex, 0);
   assert.equal(next.projects.stands, 2);
   assert.equal(next.relationships['coach-guo'], 3);
+  assert.deepEqual(next.eventHistory, season.eventHistory);
   assert.ok(next.standings.every(row => row.played === 0));
 });
 
@@ -146,4 +193,6 @@ test('invalid early match, round advance, and unknown ids fail loudly', () => {
   assert.throws(() => recordSeasonAction(season, 'missing'), /Unknown season action/);
   assert.throws(() => recordSeasonNpcTalk(season, 'missing', 'listen'), /Unknown season NPC/);
   assert.throws(() => upgradeSeasonProject(season, 'missing'), /Unknown season project/);
+  assert.throws(() => resolveSeasonEvent(season, 'missing', 'choice'), /current round/i);
+  assert.throws(() => resolveSeasonEvent(season, 'shared-pitch', 'missing'), /choice/i);
 });
