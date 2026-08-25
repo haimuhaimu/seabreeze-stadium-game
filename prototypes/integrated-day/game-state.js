@@ -51,6 +51,7 @@ import {
   recordSeasonAction,
   recordSeasonMemoryTalk,
   recordSeasonNpcTalk,
+  recordSeasonProjectVisit,
   resolveSeasonEvent,
   resolveSeasonMatchMoment,
   settleSeasonRound,
@@ -70,6 +71,7 @@ import {
 import { getSeasonEventChoice } from './season-events.js';
 import { getSeasonNpcMemory } from './season-memory.js';
 import { ELITE_RESULTS, getElitePreparation } from './elite-content.js';
+import { getConstructionScene } from './construction-content.js';
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -1236,6 +1238,29 @@ export function chooseSeasonNpcMemory(state, npcId) {
     'season-memory',
     `${npc.name}还记得“${memory.choiceLabel}”。${memory.copy}`
   );
+  return next;
+}
+
+export function visitSeasonProject(state, projectId) {
+  if (!validLeagueState(state)) return addJournal(state, 'quiet', '今天还不能使用这处设施。');
+  let scene;
+  let season;
+  try {
+    scene = getConstructionScene(projectId);
+    season = recordSeasonProjectVisit(state.season, projectId);
+  } catch (error) {
+    return addJournal(state, 'quiet', error.message.includes('already visited')
+      ? '这轮已经和这里的人一起认真用过这处设施。'
+      : error.message.includes('not built')
+        ? '这里还没有建成可以使用的东西。'
+        : '这处设施现在还不能使用。');
+  }
+  const next = copyState(state);
+  next.season = season;
+  next.minute += 12;
+  const level = next.season.projects[projectId];
+  const patron = getSeasonNpc(scene.patronId);
+  appendManagementJournal(next, 'construction-visit', `${patron.name}和你一起留在这里。${scene.levels[level - 1].visitCopy}`);
   return next;
 }
 

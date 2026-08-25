@@ -276,23 +276,35 @@ function cloneWorldObject(object) {
   };
 }
 
+function getSeasonProjectObjects(mapId, season, { builtOnly = false } = {}) {
+  const completed = new Set(season.week.actions);
+  const visited = new Set(season.week.visitedProjectIds ?? []);
+  return SEASON_PROJECT_OBJECTS
+    .filter(object => object.mapId === mapId && (!builtOnly || season.projects[object.projectId] > 0))
+    .map(object => ({
+      ...cloneWorldObject(object),
+      level: season.projects[object.projectId],
+      visited: visited.has(object.projectId),
+      buildAvailable: season.projects[object.projectId] < 3
+        && !completed.has(`build:${object.projectId}`)
+        && season.week.actions.length < 3
+    }));
+}
+
 export function getSeasonWorldObjects(mapId, season) {
   getMap(mapId);
   if (!season?.active || season.seasonComplete || season.week?.roundComplete || season.match) return [];
   const eventObject = getSeasonEventObject(season);
   if (season.week.actions.length === 3) {
-    if (eventObject) return eventObject.mapId === mapId ? [cloneWorldObject(eventObject)] : [];
-    return mapId === 'stadium' ? [cloneWorldObject(SEASON_MATCH_OBJECT)] : [];
+    const facilities = getSeasonProjectObjects(mapId, season, { builtOnly: true });
+    if (eventObject) return eventObject.mapId === mapId ? [...facilities, cloneWorldObject(eventObject)] : facilities;
+    return mapId === 'stadium' ? [...facilities, cloneWorldObject(SEASON_MATCH_OBJECT)] : facilities;
   }
   const completed = new Set(season.week.actions);
   const actions = SEASON_ACTION_OBJECTS.filter(object => object.mapId === mapId && !completed.has(object.actionId));
-  const projects = SEASON_PROJECT_OBJECTS.filter(object => (
-    object.mapId === mapId
-    && season.projects[object.projectId] < 3
-    && !completed.has(`build:${object.projectId}`)
-  ));
+  const projects = getSeasonProjectObjects(mapId, season);
   const eventObjects = eventObject?.mapId === mapId ? [eventObject] : [];
-  return [...actions, ...projects, ...eventObjects].map(cloneWorldObject);
+  return [...actions.map(cloneWorldObject), ...projects, ...eventObjects.map(cloneWorldObject)];
 }
 
 export function getNamingActionObjects(mapId, dayIndex, namingRights) {

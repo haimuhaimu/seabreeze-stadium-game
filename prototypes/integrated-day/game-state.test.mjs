@@ -39,6 +39,7 @@ import {
   chooseSeasonAction,
   chooseSeasonNpcResponse,
   buildSeasonProject,
+  visitSeasonProject,
   startLeagueMatch,
   resolveLeagueMatchChoice,
   advanceLeagueRound,
@@ -407,6 +408,25 @@ test('season actions, NPC responses, and construction update shared progress onc
   assert.equal(state.season.projects.stands, 1);
   assert.equal(state.season.week.actions.length, 3);
   assert.ok(state.economy.cash < cashBefore + 34);
+});
+
+test('using a built facility takes twelve minutes without cash or a work action', () => {
+  const before = beginLeagueSeason(completedNamingWeek());
+  before.season.projects.stands = 1;
+  const minuteBefore = before.minute;
+  const cashBefore = before.economy.cash;
+  const actionsBefore = [...before.season.week.actions];
+  const after = visitSeasonProject(before, 'stands');
+  assert.equal(after.minute, minuteBefore + 12);
+  assert.equal(after.economy.cash, cashBefore);
+  assert.deepEqual(after.season.week.actions, actionsBefore);
+  assert.deepEqual(after.season.week.visitedProjectIds, ['stands']);
+  assert.equal(after.season.relationships['lin-chuan'], 1);
+  assert.equal(after.journal.at(-1).kind, 'construction-visit');
+  assert.match(after.journal.at(-1).text, /林川.*护栏/);
+  const repeated = visitSeasonProject(after, 'stands');
+  assert.equal(repeated.minute, after.minute);
+  assert.equal(repeated.season.relationships['lin-chuan'], after.season.relationships['lin-chuan']);
 });
 
 test('a league incident changes shared progress and relationships without spending work', () => {

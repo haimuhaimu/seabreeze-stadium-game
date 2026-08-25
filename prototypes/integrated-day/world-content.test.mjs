@@ -2,7 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MAPS, canStandOnMap, getNamingActionObjects, getSeasonWorldObjects } from './world-content.js';
 import { getNpcSchedule } from './npc-schedules.js';
-import { beginSeason, createSeasonState, recordSeasonAction, resolveSeasonEvent, upgradeSeasonProject } from './season-state.js';
+import {
+  beginSeason,
+  createSeasonState,
+  recordSeasonAction,
+  recordSeasonProjectVisit,
+  resolveSeasonEvent,
+  upgradeSeasonProject
+} from './season-state.js';
 import { getSeasonEvent } from './season-events.js';
 
 test('training and stadium maps have reciprocal exits and safe spawn points', () => {
@@ -144,13 +151,27 @@ test('completed league work waits for the incident before opening the match targ
   let objects = ['training', 'stadium'].flatMap(mapId => getSeasonWorldObjects(mapId, season));
   assert.equal(objects.some(item => item.actionId === 'train-attack'), false);
   assert.equal(objects.some(item => item.actionId === 'shop-day'), false);
-  assert.equal(objects.some(item => item.projectId === 'stands'), false);
+  const builtStand = objects.find(item => item.projectId === 'stands');
+  assert.equal(builtStand.level, 1);
+  assert.equal(builtStand.visited, false);
   assert.equal(objects.some(item => item.kind === 'season-match'), false);
   assert.deepEqual(objects.filter(item => item.kind === 'season-event').map(item => item.mapId), ['training']);
   season = resolveSeasonEvent(season, 'shared-pitch', 'share-half');
   objects = ['training', 'stadium'].flatMap(mapId => getSeasonWorldObjects(mapId, season));
   assert.equal(objects.some(item => item.kind === 'season-event'), false);
   assert.deepEqual(objects.filter(item => item.kind === 'season-match').map(item => item.mapId), ['stadium']);
+});
+
+test('built and max-level facilities stay physically available for a free visit', () => {
+  let season = beginSeason(createSeasonState());
+  season.projects.stands = 3;
+  season.projects.market = 1;
+  let objects = getSeasonWorldObjects('stadium', season);
+  assert.equal(objects.find(item => item.projectId === 'stands').level, 3);
+  assert.equal(objects.find(item => item.projectId === 'market').level, 1);
+  season = recordSeasonProjectVisit(season, 'stands');
+  objects = getSeasonWorldObjects('stadium', season);
+  assert.equal(objects.find(item => item.projectId === 'stands').visited, true);
 });
 
 test('all six recurring NPCs are available during every league round with response choices', () => {
