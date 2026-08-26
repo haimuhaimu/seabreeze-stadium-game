@@ -435,6 +435,8 @@ async function testThreeDayLoop() {
       && document.querySelector('.world-map').src.includes('seaside-club-handpainted-v4.png'),
     playerAtlas: getComputedStyle(document.querySelector('.player-sprite')).backgroundImage.includes('an-ruotong-unified-v4-aligned.png'),
     teamAtlas: getComputedStyle(document.querySelector('.npc-guo')).backgroundImage.includes('team-roster-handpainted-v2-aligned.png'),
+    itemAtlas: getComputedStyle(document.querySelector('.item-sprite')).backgroundImage.includes('item-atlas-handpainted-v2.png'),
+    itemRendering: getComputedStyle(document.querySelector('.item-sprite')).imageRendering,
     startHidden: document.querySelector('[data-start-card]').hidden
   })`);
   assert(desktop.phase === 'morning' && desktop.date === '春 12', 'The chapter does not begin on spring 12');
@@ -442,6 +444,8 @@ async function testThreeDayLoop() {
   assert(desktop.mapLoaded, 'The seaside map did not load');
   assert(desktop.playerAtlas, 'The unified An Ruotong atlas is not connected');
   assert(desktop.teamAtlas, 'The complete team atlas is not connected');
+  assert(desktop.itemAtlas, 'The hand-painted item atlas is not connected');
+  assert(desktop.itemRendering === 'auto', 'The hand-painted item atlas is still forced into pixel rendering');
   assert(desktop.startHidden, 'Starting the prologue did not close the launch screen');
 
   const beforeWalk = await evaluate('window.__integratedDayDebug.getPosition()');
@@ -682,7 +686,14 @@ async function testThreeDayLoop() {
   await click('[data-begin-naming-week]');
   await waitFor('window.__integratedDayDebug.getState().dayIndex === 10', 'The naming-rights week did not begin');
   assert(await evaluate('!document.querySelector("[data-stadium-sign]").hidden'), 'The covered stadium sign is missing');
+  assert(await evaluate(`(() => {
+    const sign = document.querySelector('.stadium-name-old');
+    const cloth = document.querySelector('.stadium-name-cloth');
+    return getComputedStyle(sign).backgroundImage.includes('stadium-sign-frame-v2.png')
+      && getComputedStyle(cloth).backgroundImage.includes('stadium-sponsor-cloth-v2.png');
+  })()`), 'The remastered stadium sign assets are not connected');
   assert((await text('[data-care-title]')).includes('蓝布'), 'The naming-rights HUD does not introduce the covered sign');
+  await capture('naming-sign');
 
   await walkAndWait('guest-gate', '!document.querySelector("[data-story-scene]").hidden');
   assert((await text('[data-story-prop-caption]')).includes('蓝布'), 'The naming proposal is missing its physical prop');
@@ -702,6 +713,7 @@ async function testThreeDayLoop() {
   });
   await sleep(250);
   assert(!await evaluate('document.documentElement.scrollWidth > innerWidth'), 'The naming-rights world overflows on mobile');
+  await capture('naming-sign-mobile');
   await send('Emulation.setDeviceMetricsOverride', {
     width: 1440,
     height: 900,
@@ -748,6 +760,7 @@ async function testThreeDayLoop() {
 
   await click('[data-begin-season]');
   await waitFor('window.__integratedDayDebug.getState().season.active && window.__integratedDayDebug.getState().dayIndex === 17', 'The Haifeng league did not begin');
+  await capture('stadium-sign-revealed');
   assert(!await evaluate('document.querySelector("[data-season-docket]").hidden'), 'The persistent league docket is missing');
   assert((await text('[data-season-actions]')) === '行动 0 / 3', 'The first league round does not start with three open actions');
   assert(await evaluate('document.querySelectorAll("[data-construction-project]").length === 4'), 'The stadium does not show its four construction regions');

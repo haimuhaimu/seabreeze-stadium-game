@@ -346,10 +346,10 @@ kbd {
   display: block;
   width: 48px;
   height: 48px;
-  background: url("./assets/item-atlas.png") no-repeat;
+  background: url("./assets/item-atlas-handpainted-v2.png") no-repeat;
   background-size: 300% 300%;
-  image-rendering: pixelated;
-  filter: drop-shadow(0 3px 2px rgb(7 14 10 / 38%));
+  image-rendering: auto;
+  filter: drop-shadow(0 3px 2px rgb(7 14 10 / 30%));
 }
 
 .item-tea { background-position: 0 0; }
@@ -498,13 +498,14 @@ kbd {
 .stadium-name-layer {
   position: absolute;
   z-index: 3;
-  left: 50%;
-  top: 18.5%;
-  width: 228px;
-  height: 54px;
+  left: 44%;
+  top: 10.4%;
+  width: 224px;
+  height: 96px;
+  isolation: isolate;
   pointer-events: none;
-  transform: translateX(-50%) rotate(-1deg);
-  filter: drop-shadow(0 5px 4px rgb(10 32 38 / 32%));
+  transform: translateX(-50%) rotate(-.45deg);
+  filter: drop-shadow(0 6px 5px rgb(10 32 38 / 30%));
 }
 
 .stadium-name-old,
@@ -513,33 +514,43 @@ kbd {
   inset: 0;
   display: grid;
   place-items: center;
-  border: 3px solid #f1e4c5;
-  border-radius: 6px;
+  box-sizing: border-box;
+  border: 0;
+  border-radius: 0;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
   color: #f6ead0;
-  font: 900 24px/1 "Avenir Next", "PingFang SC", sans-serif;
-  letter-spacing: .12em;
-  text-shadow: 0 2px 0 rgb(48 36 31 / 34%);
+  font: 900 20px/1 "Avenir Next", "PingFang SC", sans-serif;
+  letter-spacing: .16em;
+  text-shadow: 0 2px 0 rgb(48 36 31 / 42%), 0 0 1px rgb(48 36 31 / 55%);
 }
 
 .stadium-name-old {
-  background: #b94f43;
-  box-shadow: inset 0 0 0 2px #275d6e;
+  padding-top: 16px;
+  background-image: url("./assets/stadium-sign-frame-v2.png");
 }
 
 .stadium-name-cloth {
-  inset: -7px -14px -5px;
-  border-color: #79aeb8;
-  background: #25627a;
+  inset: -2px -7px -5px;
+  padding-top: 1px;
+  background-image: url("./assets/stadium-sponsor-cloth-v2.png");
   color: #e8f2ef;
-  letter-spacing: .2em;
-  transform: rotate(1deg);
+  letter-spacing: .14em;
+  text-shadow: 0 2px 0 rgb(18 57 77 / 58%);
+  transform: rotate(.7deg);
 }
 
 .stadium-name-layer[data-sign="old"] .stadium-name-cloth,
 .stadium-name-layer[data-sign="community"] .stadium-name-cloth,
 .stadium-name-layer[data-sign="delay"] .stadium-name-cloth { display: none; }
 .stadium-name-layer[data-sign="co-name"] .stadium-name-old { color: transparent; }
-.stadium-name-layer[data-sign="co-name"] .stadium-name-cloth { inset: 0; transform: none; }
+.stadium-name-layer[data-sign="co-name"] .stadium-name-cloth {
+  inset: 0;
+  font-size: 16px;
+  letter-spacing: .05em;
+  transform: none;
+}
 .stadium-name-layer[data-sign="co-name"] .stadium-name-cloth::after { content: "· 海风球场"; }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -2421,9 +2432,11 @@ kbd {
   .week-metrics { grid-template-columns: repeat(3, 1fr); }
   .week-metrics div:nth-child(3) { border-right: 0; }
   .week-character { grid-template-columns: 1fr; }
-  .stadium-name-layer { top: 18.5%; width: 170px; height: 42px; }
+  .stadium-name-layer { left: 44%; top: 10.4%; width: 170px; height: 73px; }
   .stadium-name-old,
-  .stadium-name-cloth { font-size: 17px; }
+  .stadium-name-cloth { font-size: 14px; }
+  .stadium-name-old { padding-top: 12px; }
+  .stadium-name-layer[data-sign="co-name"] .stadium-name-cloth { font-size: 12px; }
   .naming-reveal { min-height: 110px; padding: 14px 12px 14px 124px; }
   .naming-reveal::before { width: 112px; }
 }
