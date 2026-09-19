@@ -8,10 +8,13 @@
 
 **Tech Stack:** Browser-native ES modules, HTML, CSS, Node test runner, existing Chrome DevTools smoke harness.
 
+## Execution Order
+
+实际执行顺序为 Task 1、Task 3、Task 2、Task 4、Task 5、Task 6。Task 3 先做是为了尽早获得画面反馈；它只依赖 Task 1 的 `getMatchOutlook`，与 Task 2 的建设里程碑无耦合。Task 2 完成后需回到 Task 3 的面板补充里程碑进度显示。
+
 ## Global Constraints
 
-- 存档版本保持 5，不改变字段结构，版本 1 至 4 迁移链行为不变。
-- 不新增建设项目，不改动两周主线剧情、赛季事件文本与精英邀请赛结构。
+- 存档版本保持 5，不改变字段结构，版本 1 至 4 迁移链行为不变。- 不新增建设项目，不改动两周主线剧情、赛季事件文本与精英邀请赛结构。
 - 不引入第三方依赖，不引入 `Math.random`，保持全项目可确定性回归。
 - 不拆分 `game.js` 模块结构，不替换素材，不改动 `prototypes/day-loop/`。
 - 不暂存或修改用户未跟踪的源图文件。
@@ -95,27 +98,29 @@ Commit: `feat: unlock match moments from stadium construction`
 - Modify: `prototypes/integrated-day/smoke-test.mjs`
 
 **Interfaces:**
-- Renders: `[data-match-outlook]`，显示局势评估、开局让球与下一个建设节点距离。
+- Renders: `[data-match-outlook]`，显示局势评估、开局让球与连续的实力差。
 
-- [ ] **Step 1: Add failing browser assertions**
+- [x] **Step 1: Add failing browser assertions**
 
-载入混合建设等级的联赛存档，断言局势区块存在、建设 5 级与 6 级显示不同让球、显示到下一里程碑的差距、390x844 无溢出、无控制台错误。
+载入混合建设等级的联赛存档，断言局势区块存在、建设 2 级与 15 级显示不同实力差、报告当前建设级数、390x844 无溢出、无控制台错误。
 
-- [ ] **Step 2: Run smoke test and verify RED**
+- [x] **Step 2: Run smoke test and verify RED**
 
 Run: `node --experimental-websocket prototypes/integrated-day/smoke-test.mjs`
 
 Expected: 局势选择器不存在。
 
-- [ ] **Step 3: Render the outlook block**
+- [x] **Step 3: Render the outlook block**
 
-复用 `getMatchOutlook` 与 `getConstructionUnlocks`，不在视图层重算数值。保持现有手绘风格与珊瑚色强调色。
+复用 `getMatchOutlook`，不在视图层重算数值。保持现有手绘风格与珊瑚色强调色。
 
-- [ ] **Step 4: Run smoke test and inspect screenshots**
+实施修正：最初只显示开场让球，但让球只有 0 至 3 四档，在弱对手一侧建设 2 级与 15 级都显示“开场不落后”，投入依然无感。因此增加连续的实力差字段，由它承担每一级建设与每一点凝聚的即时反馈。
 
-检查桌面与窄屏截图的文字对比、换行与遮挡。
+- [x] **Step 4: Run smoke test and inspect screenshots**
 
-- [ ] **Step 5: Commit**
+检查桌面与窄屏截图的文字对比、换行与遮挡。已确认 1440x900 与 390x844 均无溢出、无裁切，并逐档核对五种局势文案。
+
+- [x] **Step 5: Commit**
 
 Commit: `feat: show match outlook before kickoff`
 
