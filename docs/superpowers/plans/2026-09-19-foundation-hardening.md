@@ -29,27 +29,27 @@
 - Produces: `getMatchOutlook(snapshot, projects, opponentDifficulty)` 返回 `{ rating, gap, concededGoals }`。
 - Changes: `teamRating` 权重改为 cohesion 0.26、facility 0.16、建设 0.85；`startSeasonMatch` 的开局让球改为 `clamp(floor(gap / 9), 0, 3)`。
 
-- [ ] **Step 1: Write failing rating and conceded-goal tests**
+- [x] **Step 1: Write failing rating and conceded-goal tests**
 
 断言新权重下凝聚与设施的贡献值、连续映射在 gap 为 8、9、17、18、26、27 各档的让球数、上限截断为 3，以及起点属性对阵最强队让 2 球、中期属性对阵最强队不让球。
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run: `node --test prototypes/integrated-day/season-state.test.mjs`
 
 Expected: `getMatchOutlook` 未导出，权重与让球断言失败。
 
-- [ ] **Step 3: Implement the continuous mapping**
+- [x] **Step 3: Implement the continuous mapping**
 
 提取共享的评分与让球计算，供 `startSeasonMatch` 和新的展示接口同时使用，避免两处口径漂移。
 
-- [ ] **Step 4: Run the focused test and verify GREEN**
+- [x] **Step 4: Run the focused test and verify GREEN**
 
 Run: `node --test prototypes/integrated-day/season-state.test.mjs`
 
 Expected: all pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Commit: `feat: map team rating to conceded goals continuously`
 
