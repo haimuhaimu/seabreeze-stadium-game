@@ -168,6 +168,12 @@ export const SEASON_GOALS = freeze({
   finance: freeze({ id: 'finance', label: '账上留有下一周的钱', description: '赛季结束现金不少于 180 元' })
 });
 
+export const CONSTRUCTION_MILESTONES = freeze({
+  extraMoment: 6,
+  forgiveOpening: 10,
+  fullBuild: 15
+});
+
 export const MATCH_MOMENTS = freeze([
   freeze({
     id: 'opening-plan', minute: 18, title: '对手开始试探海风队的准备',
@@ -179,12 +185,32 @@ export const MATCH_MOMENTS = freeze([
     ])
   }),
   freeze({
+    id: 'built-ground', minute: 38, title: '球场第一次按建好的样子运转',
+    copy: '修过的地方今天都在被人使用。谁来把这件事变成场上的一次机会。', awayPressure: 0,
+    requiresLevels: CONSTRUCTION_MILESTONES.extraMoment,
+    choices: freeze([
+      freeze({ id: 'use-safe-touchline', label: '沿修好的边线压上一次', callback: 'stands' }),
+      freeze({ id: 'call-recovered-player', label: '让恢复好的人站到前面', callback: 'clinic' }),
+      freeze({ id: 'let-academy-start', label: '让青训角练过的人先动', callback: 'youth' })
+    ])
+  }),
+  freeze({
     id: 'home-ground', minute: 52, title: '海风变大，看台和场边都在回应比赛',
     copy: '球场这周留下的变化，现在会不会有人用得上。', awayPressure: 1,
     choices: freeze([
       freeze({ id: 'open-safe-stands', label: '请大家移到加固后的看台', callback: 'stands' }),
       freeze({ id: 'send-market-support', label: '让小店和集市把热水送过去', callback: 'market' }),
       freeze({ id: 'bring-community-back', label: '请社区时段的人把歌声带回来', callback: 'community' })
+    ])
+  }),
+  freeze({
+    id: 'finished-stadium', minute: 68, title: '整座球场再没有一处写着待开工',
+    copy: '五项工程今天同时在用。这不是某一个人的功劳，现在也不该只交给一个人。', awayPressure: 0,
+    requiresLevels: CONSTRUCTION_MILESTONES.fullBuild,
+    choices: freeze([
+      freeze({ id: 'run-night-system', label: '按夜赛系统重新组织进攻', callback: 'lights' }),
+      freeze({ id: 'gather-whole-club', label: '让集市和看台一起把人叫回来', callback: 'market' }),
+      freeze({ id: 'trust-the-house', label: '把球交给最熟悉这座球场的人', callback: 'cohesion' })
     ])
   }),
   freeze({

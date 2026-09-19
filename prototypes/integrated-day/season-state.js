@@ -1,4 +1,5 @@
 import {
+  CONSTRUCTION_MILESTONES,
   LEAGUE_TEAMS,
   MATCH_MOMENTS,
   SEASON_ACTIONS,
@@ -300,9 +301,29 @@ function callbackReady(state, callback) {
   return false;
 }
 
+export function getConstructionUnlocks(projects) {
+  if (!projects || typeof projects !== 'object') throw new TypeError('Invalid project levels');
+  const total = Object.values(projects).reduce((sum, value) => sum + value, 0);
+  return {
+    extraMoment: total >= CONSTRUCTION_MILESTONES.extraMoment,
+    forgiveOpening: total >= CONSTRUCTION_MILESTONES.forgiveOpening,
+    fullBuild: total >= CONSTRUCTION_MILESTONES.fullBuild
+  };
+}
+
+function availableMoments(projects) {
+  const unlocks = getConstructionUnlocks(projects);
+  return MATCH_MOMENTS.filter(moment => {
+    if (!moment.requiresLevels) return true;
+    if (moment.requiresLevels === CONSTRUCTION_MILESTONES.extraMoment) return unlocks.extraMoment;
+    if (moment.requiresLevels === CONSTRUCTION_MILESTONES.fullBuild) return unlocks.fullBuild;
+    return false;
+  });
+}
+
 export function getSeasonMatchMoment(state) {
   if (!state.match || state.match.complete) throw new Error('No active season match moment');
-  const moment = MATCH_MOMENTS[state.match.highlightIndex];
+  const moment = availableMoments(state.projects)[state.match.highlightIndex];
   if (!moment) throw new Error('No active season match moment');
   return {
     ...moment,
@@ -318,13 +339,13 @@ export function resolveSeasonMatchMoment(state, choiceId) {
   if (choice.callbackReady) {
     next.match.homeGoals += 1;
     if (!next.match.callbackIds.includes(choice.callback)) next.match.callbackIds.push(choice.callback);
-  } else if (moment.id === 'opening-plan') {
+  } else if (moment.id === 'opening-plan' && !getConstructionUnlocks(next.projects).forgiveOpening) {
     next.match.awayGoals += 1;
   }
   next.match.awayGoals += moment.awayPressure;
   next.match.choices.push(choiceId);
   next.match.highlightIndex += 1;
-  next.match.complete = next.match.highlightIndex === MATCH_MOMENTS.length;
+  next.match.complete = next.match.highlightIndex === availableMoments(next.projects).length;
   return next;
 }
 
@@ -418,7 +439,11 @@ export function settleSeasonRound(state) {
     awayGoals: next.match.awayGoals,
     points: next.match.homeGoals > next.match.awayGoals ? 3 : next.match.homeGoals === next.match.awayGoals ? 1 : 0
   };
-  next.roundHistory.push({ round: next.roundIndex + 1, ...next.week.result });
+  next.roundHistory.push({
+    round: next.roundIndex + 1,
+    ...next.week.result,
+    fullBuild: getConstructionUnlocks(next.projects).fullBuild
+  });
   if (next.roundIndex === 6) {
     next.seasonComplete = true;
     next.goals = getSeasonGoalStatus(next, next.match.snapshot);

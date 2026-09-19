@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  CONSTRUCTION_MILESTONES,
   LEAGUE_TEAMS,
   MATCH_MOMENTS,
   SEASON_ACTIONS,
@@ -37,10 +38,32 @@ test('weekly work and match choices use plain language with explicit effects', (
   assert.deepEqual(Object.keys(SEASON_ACTIONS), [
     'train-attack', 'train-defense', 'youth-session', 'shop-day', 'community-open', 'maintenance', 'rest'
   ]);
-  assert.equal(MATCH_MOMENTS.length, 3);
+  assert.equal(MATCH_MOMENTS.length, 5);
+  assert.equal(MATCH_MOMENTS.filter(moment => !moment.requiresLevels).length, 3);
   assert.ok(MATCH_MOMENTS.every(moment => moment.choices.length === 3));
   assert.ok(Object.values(SEASON_ACTIONS).every(action => action.resultCopy.length >= 12));
   assert.equal(Object.keys(SEASON_GOALS).length, 4);
+});
+
+test('construction milestones gate two extra match moments with real callbacks', () => {
+  assert.deepEqual(
+    Object.keys(CONSTRUCTION_MILESTONES),
+    ['extraMoment', 'forgiveOpening', 'fullBuild']
+  );
+  assert.equal(CONSTRUCTION_MILESTONES.extraMoment, 6);
+  assert.equal(CONSTRUCTION_MILESTONES.forgiveOpening, 10);
+  assert.equal(CONSTRUCTION_MILESTONES.fullBuild, 15);
+
+  const gated = MATCH_MOMENTS.filter(moment => moment.requiresLevels);
+  assert.equal(gated.length, 2);
+  assert.deepEqual(gated.map(moment => moment.requiresLevels), [6, 15]);
+  assert.ok(gated.every(moment => moment.choices.every(choice => typeof choice.callback === 'string' && choice.callback.length > 0)));
+  assert.ok(gated.every(moment => Number.isFinite(moment.awayPressure) && moment.awayPressure === 0));
+  assert.ok(gated.every(moment => moment.copy.length >= 12 && moment.title.length >= 6));
+
+  const minutes = MATCH_MOMENTS.map(moment => moment.minute);
+  assert.deepEqual(minutes, [...minutes].sort((a, b) => a - b), 'moments must stay in kickoff order');
+  assert.equal(new Set(MATCH_MOMENTS.map(moment => moment.id)).size, MATCH_MOMENTS.length);
 });
 
 test('content getters reject unknown ids and out of range rounds', () => {

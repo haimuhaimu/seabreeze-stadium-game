@@ -11,6 +11,7 @@ import {
   getSeasonGoalStatus,
   getSeasonMatchMoment,
   getMatchOutlook,
+  getConstructionUnlocks,
   getStandings,
   recordSeasonAction,
   recordSeasonMemoryTalk,
@@ -199,10 +200,13 @@ function playRound(season, prepared) {
   for (const actionId of actions) season = recordSeasonAction(season, actionId);
   if (prepared) season = recordSeasonNpcTalk(season, 'coach-guo', 'solve');
   season = startSeasonMatch(season, prepared ? strongSnapshot : weakSnapshot);
-  const choices = prepared
-    ? ['use-attack-work', 'bring-community-back', 'follow-coach-note']
-    : ['trust-young-side', 'open-safe-stands', 'use-clinic-sub'];
-  for (const choiceId of choices) season = resolveSeasonMatchMoment(season, choiceId);
+  while (!season.match.complete) {
+    const moment = getSeasonMatchMoment(season);
+    const choice = prepared
+      ? moment.choices.find(item => item.callbackReady) ?? moment.choices[0]
+      : moment.choices.at(-1);
+    season = resolveSeasonMatchMoment(season, choice.id);
+  }
   season = settleSeasonRound(season);
   return season.seasonComplete ? season : advanceSeasonRound(season);
 }
@@ -311,6 +315,93 @@ test('the outlook keeps one shared source of truth with the kickoff deficit', ()
   season = startSeasonMatch(season, weakSnapshot);
   assert.equal(season.match.awayGoals, outlook.concededGoals);
   assert.ok(Number.isFinite(outlook.gap));
+});
+
+function prepareMatchWeek(season, projects) {
+  let next = season;
+  if (projects) next.projects = { ...projects };
+  next = recordSeasonAction(next, 'train-attack');
+  next = recordSeasonAction(next, 'community-open');
+  next = recordSeasonAction(next, 'train-defense');
+  next = resolveSeasonEvent(next, 'shared-pitch', 'share-half');
+  return startSeasonMatch(next, strongSnapshot);
+}
+
+test('construction unlocks are derived from the project levels alone', () => {
+  const levels = total => ({
+    stands: Math.min(3, total),
+    clinic: Math.max(0, Math.min(3, total - 3)),
+    academy: Math.max(0, Math.min(3, total - 6)),
+    market: Math.max(0, Math.min(3, total - 9)),
+    lights: Math.max(0, Math.min(3, total - 12))
+  });
+
+  assert.deepEqual(getConstructionUnlocks(levels(5)), { extraMoment: false, forgiveOpening: false, fullBuild: false });
+  assert.deepEqual(getConstructionUnlocks(levels(6)), { extraMoment: true, forgiveOpening: false, fullBuild: false });
+  assert.deepEqual(getConstructionUnlocks(levels(9)), { extraMoment: true, forgiveOpening: false, fullBuild: false });
+  assert.deepEqual(getConstructionUnlocks(levels(10)), { extraMoment: true, forgiveOpening: true, fullBuild: false });
+  assert.deepEqual(getConstructionUnlocks(levels(14)), { extraMoment: true, forgiveOpening: true, fullBuild: false });
+  assert.deepEqual(getConstructionUnlocks(levels(15)), { extraMoment: true, forgiveOpening: true, fullBuild: true });
+});
+
+test('six construction levels add a fourth moment and raise the scoring ceiling', () => {
+  let bare = prepareMatchWeek(beginSeason(createSeasonState()), { stands: 2, clinic: 1, academy: 1, market: 1, lights: 0 });
+  const bareIds = [];
+  while (!bare.match.complete) {
+    const moment = getSeasonMatchMoment(bare);
+    bareIds.push(moment.id);
+    bare = resolveSeasonMatchMoment(bare, moment.choices[0].id);
+  }
+  assert.equal(bareIds.length, 3, 'five construction levels keep the original three moments');
+
+  let built = prepareMatchWeek(beginSeason(createSeasonState()), { stands: 3, clinic: 2, academy: 1, market: 0, lights: 0 });
+  const builtIds = [];
+  let scored = 0;
+  while (!built.match.complete) {
+    const moment = getSeasonMatchMoment(built);
+    builtIds.push(moment.id);
+    const ready = moment.choices.find(choice => choice.callbackReady) ?? moment.choices[0];
+    if (ready.callbackReady) scored += 1;
+    built = resolveSeasonMatchMoment(built, ready.id);
+  }
+  assert.equal(builtIds.length, 4, 'six construction levels open a fourth moment');
+  assert.ok(built.match.homeGoals <= 4 && built.match.homeGoals === scored);
+  assert.ok(built.match.homeGoals > 3 === (scored > 3));
+});
+
+test('ten construction levels forgive a missed opening plan', () => {
+  const missOpening = projects => {
+    let season = beginSeason(createSeasonState());
+    season.projects = { ...projects };
+    season = recordSeasonAction(season, 'rest');
+    season = recordSeasonAction(season, 'shop-day');
+    season = recordSeasonAction(season, 'maintenance');
+    season = resolveSeasonEvent(season, 'shared-pitch', 'share-half');
+    season = startSeasonMatch(season, strongSnapshot);
+    const opening = getSeasonMatchMoment(season);
+    assert.equal(opening.id, 'opening-plan');
+    const cold = opening.choices.find(choice => !choice.callbackReady);
+    assert.ok(cold, 'the opening plan needs one unprepared choice for this check');
+    return resolveSeasonMatchMoment(season, cold.id).match.awayGoals;
+  };
+
+  const punished = missOpening({ stands: 3, clinic: 3, academy: 1, market: 1, lights: 1 });
+  const forgiven = missOpening({ stands: 3, clinic: 3, academy: 2, market: 1, lights: 1 });
+  assert.equal(punished - forgiven, 1, 'reaching ten levels removes the extra opening goal');
+});
+
+test('a full build opens its own moment and records the finished stadium', () => {
+  let season = prepareMatchWeek(beginSeason(createSeasonState()), { stands: 3, clinic: 3, academy: 3, market: 3, lights: 3 });
+  const ids = [];
+  while (!season.match.complete) {
+    const moment = getSeasonMatchMoment(season);
+    ids.push(moment.id);
+    const ready = moment.choices.find(choice => choice.callbackReady) ?? moment.choices[0];
+    season = resolveSeasonMatchMoment(season, ready.id);
+  }
+  assert.equal(ids.length, 5, 'a finished stadium plays every authored moment');
+  season = settleSeasonRound(season);
+  assert.equal(season.roundHistory.at(-1).fullBuild, true);
 });
 
 test('invalid early match, round advance, and unknown ids fail loudly', () => {
