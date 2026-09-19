@@ -1323,6 +1323,10 @@ kbd {
 .season-docket small b { font-weight: 700; }
 .season-docket .season-incident-line { margin-top: 6px; padding-top: 6px; border-top: 1px solid rgb(228 242 244 / 16%); color: #f0d39a; }
 .season-docket [data-season-incident-status].complete { color: #9cc7ba; }
+.season-docket .season-outlook-line { margin-top: 6px; padding-top: 6px; border-top: 1px solid rgb(228 242 244 / 16%); color: #9cc7ba; }
+.season-docket .season-outlook-line.behind { color: #ffad9e; }
+.season-docket .season-outlook-summary { margin-top: 3px; color: #b8cbce; font-size: 8px; line-height: 1.5; }
+.season-docket .season-outlook-summary b { display: block; font-weight: 700; overflow-wrap: anywhere; }
 .season-docket > button:hover { border-color: #dc735f; background: rgb(20 51 60 / 97%); }
 
 .care-card,

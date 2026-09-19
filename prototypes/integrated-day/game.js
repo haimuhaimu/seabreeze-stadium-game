@@ -79,7 +79,7 @@ import {
   getNamingDay,
   getNamingScene
 } from './naming-rights-content.js';
-import { getSeasonEliteMoment, getSeasonMatchMoment, getSeasonGoalStatus, getStandings } from './season-state.js';
+import { getSeasonEliteMoment, getSeasonMatchMoment, getSeasonGoalStatus, getStandings, getMatchOutlook } from './season-state.js';
 import {
   SEASON_ACTIONS,
   SEASON_GOALS,
@@ -1377,6 +1377,35 @@ function seasonRank() {
   return getStandings(state.season).findIndex(row => row.teamId === 'haifeng') + 1;
 }
 
+function renderMatchOutlook() {
+  const outlookLine = document.querySelector('[data-match-outlook]');
+  if (!outlookLine) return;
+  const round = getSeasonRound(state.season.roundIndex);
+  const opponent = getLeagueTeam(round.playerOpponentId);
+  const difficulty = opponent.strength + Math.max(0, state.season.seasonNumber - 1) * 2;
+  const outlook = getMatchOutlook({
+    attack: state.roster.attack,
+    defense: state.roster.defense,
+    cohesion: state.roster.cohesion,
+    facility: state.facilities.condition,
+    cash: state.economy.cash
+  }, state.season.projects, difficulty);
+
+  const levels = Object.values(state.season.projects).reduce((sum, value) => sum + value, 0);
+  const edge = -outlook.gap;
+  document.querySelector('[data-outlook-construction]').textContent = `建设 ${levels} 级`;
+  document.querySelector('[data-outlook-deficit]').textContent = outlook.concededGoals === 0
+    ? '开场不落后'
+    : `开场落后 ${outlook.concededGoals} 球`;
+  document.querySelector('[data-outlook-edge]').textContent = edge >= 0
+    ? `实力领先 ${edge.toFixed(1)}`
+    : `实力落后 ${Math.abs(edge).toFixed(1)}`;
+  document.querySelector('[data-outlook-summary]').textContent = outlook.concededGoals === 0
+    ? `这一周准备的东西，够对上${opponent.name}`
+    : `${opponent.name}比现在的海风队更完整`;
+  outlookLine.classList.toggle('behind', outlook.concededGoals > 0);
+}
+
 function renderSeasonDocket() {
   const active = isLeagueSeason();
   seasonDocket.hidden = !active;
@@ -1393,6 +1422,7 @@ function renderSeasonDocket() {
     ? `已回应：${getSeasonEventChoice(event.id, state.season.week.eventChoiceId).label}`
     : `待回应：${event.title}`;
   status.classList.toggle('complete', Boolean(state.season.week.eventChoiceId));
+  renderMatchOutlook();
 }
 
 function renderSeasonConversation() {
@@ -3060,6 +3090,12 @@ window.__integratedDayDebug = {
   advanceCampaignDay: goToNextDay,
   shootAt: value => resolveTrainingShot(value),
   isMoving: () => moving || Boolean(destination),
+  setSeasonProjects: levels => {
+    if (!state.season) return false;
+    state.season.projects = { ...state.season.projects, ...levels };
+    render();
+    return true;
+  },
   hasSave: () => loadSave(localStorage).ok,
   clearProjectSave: () => clearSave(localStorage)
 };

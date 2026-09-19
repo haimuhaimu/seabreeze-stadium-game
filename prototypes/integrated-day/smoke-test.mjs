@@ -919,6 +919,34 @@ async function testThreeDayLoop() {
   assert(construction.maxTarget, 'A max-level facility cannot be revisited');
   assert(!construction.overflow, 'Mixed construction world overflows on desktop');
   await capture('construction-desktop');
+
+  const outlookEight = await evaluate(`({
+    present: Boolean(document.querySelector('[data-match-outlook]')),
+    deficit: (document.querySelector('[data-outlook-deficit]') || {}).textContent || '',
+    summary: (document.querySelector('[data-outlook-summary]') || {}).textContent || '',
+    levels: (document.querySelector('[data-outlook-construction]') || {}).textContent || ''
+  })`);
+  assert(outlookEight.present, 'The match outlook block is missing during a league round');
+  assert(outlookEight.levels.includes('8'), `The outlook does not report the current eight construction levels: ${JSON.stringify(outlookEight)}`);
+  assert(outlookEight.summary.trim().length > 0, 'The outlook shows no readable situation summary');
+
+  const outlookShift = await evaluate(`(() => {
+    const read = () => ({
+      deficit: document.querySelector('[data-outlook-deficit]').textContent,
+      edge: document.querySelector('[data-outlook-edge]').textContent,
+      levels: document.querySelector('[data-outlook-construction]').textContent
+    });
+    const debug = window.__integratedDayDebug;
+    debug.setSeasonProjects({ stands: 1, clinic: 1, academy: 0, market: 0, lights: 0 });
+    const low = read();
+    debug.setSeasonProjects({ stands: 3, clinic: 3, academy: 3, market: 3, lights: 3 });
+    const high = read();
+    debug.setSeasonProjects({ stands: 3, clinic: 2, academy: 1, market: 2, lights: 0 });
+    return { low, high };
+  })()`);
+  assert(outlookShift.low.levels.includes('2') && outlookShift.high.levels.includes('15'), `The outlook does not follow construction levels: ${JSON.stringify(outlookShift)}`);
+  assert(outlookShift.low.edge !== outlookShift.high.edge, `Construction must visibly change the strength edge: ${JSON.stringify(outlookShift)}`);
+
   await send('Emulation.setDeviceMetricsOverride', {
     width: 390,
     height: 844,
@@ -927,6 +955,7 @@ async function testThreeDayLoop() {
   });
   await sleep(250);
   assert(!await evaluate('document.documentElement.scrollWidth > innerWidth'), 'The living construction world overflows on mobile');
+  await assertInsideViewport('[data-match-outlook]');
   await capture('construction-mobile');
   await send('Emulation.setDeviceMetricsOverride', {
     width: 1440,
