@@ -10,6 +10,7 @@ import {
   getSeasonEliteMoment,
   getSeasonGoalStatus,
   getSeasonMatchMoment,
+  getMatchOutlook,
   getStandings,
   recordSeasonAction,
   recordSeasonMemoryTalk,
@@ -25,6 +26,7 @@ import {
   resolveSeasonEliteMoment
 } from './season-state.js';
 import { getSeasonEvent } from './season-events.js';
+import { getLeagueTeam, getSeasonRound } from './season-content.js';
 
 const strongSnapshot = Object.freeze({ attack: 62, defense: 60, cohesion: 61, facility: 68, cash: 220 });
 const weakSnapshot = Object.freeze({ attack: 44, defense: 43, cohesion: 42, facility: 40, cash: 70 });
@@ -267,6 +269,48 @@ test('goals are readable and a new season preserves projects and relationships',
   assert.equal(next.relationships['coach-guo'], 3);
   assert.deepEqual(next.eventHistory, season.eventHistory);
   assert.ok(next.standings.every(row => row.played === 0));
+});
+
+test('team rating gives cohesion and facility a readable share of the outlook', () => {
+  const projects = { stands: 2, clinic: 1, academy: 1, market: 1, lights: 1 };
+  const base = { attack: 58, defense: 56, cohesion: 58, facility: 62, cash: 200 };
+  const baseRating = getMatchOutlook(base, projects, 60).rating;
+
+  const strongerBond = getMatchOutlook({ ...base, cohesion: 85 }, projects, 60).rating;
+  const betterGround = getMatchOutlook({ ...base, facility: 90 }, projects, 60).rating;
+  assert.ok(strongerBond - baseRating > 6.5, 'cohesion should move the outlook by more than six points');
+  assert.ok(betterGround - baseRating > 4, 'facility should move the outlook by more than four points');
+
+  const fullBuild = getMatchOutlook(base, { stands: 3, clinic: 3, academy: 3, market: 3, lights: 3 }, 60).rating;
+  const sixLevels = getMatchOutlook(base, projects, 60).rating;
+  assert.ok(fullBuild - sixLevels > 7, 'the last nine construction levels must still raise the rating');
+});
+
+test('conceded goals scale continuously with the gap instead of two hard steps', () => {
+  const flat = { attack: 50, defense: 50, cohesion: 50, facility: 50, cash: 0 };
+  const noProjects = { stands: 0, clinic: 0, academy: 0, market: 0, lights: 0 };
+  const concededFor = difficulty => getMatchOutlook(flat, noProjects, difficulty).concededGoals;
+
+  assert.equal(getMatchOutlook(flat, noProjects, 50).rating, 50);
+  assert.equal(concededFor(58), 0, 'a gap of eight stays goalless');
+  assert.equal(concededFor(59), 1, 'a gap of nine concedes the first goal');
+  assert.equal(concededFor(67), 1, 'a gap of seventeen still concedes one');
+  assert.equal(concededFor(68), 2, 'a gap of eighteen concedes two');
+  assert.equal(concededFor(77), 3, 'a gap of twenty-seven concedes three');
+  assert.equal(concededFor(200), 3, 'the deficit is capped at three goals');
+  assert.equal(concededFor(20), 0, 'a stronger club never concedes from the outlook');
+});
+
+test('the outlook keeps one shared source of truth with the kickoff deficit', () => {
+  let season = beginSeason(createSeasonState());
+  season = recordSeasonAction(season, 'train-attack');
+  season = recordSeasonAction(season, 'community-open');
+  season = recordSeasonAction(season, 'train-defense');
+  season = resolveSeasonEvent(season, 'shared-pitch', 'share-half');
+  const outlook = getMatchOutlook(weakSnapshot, season.projects, getLeagueTeam(getSeasonRound(0).playerOpponentId).strength);
+  season = startSeasonMatch(season, weakSnapshot);
+  assert.equal(season.match.awayGoals, outlook.concededGoals);
+  assert.ok(Number.isFinite(outlook.gap));
 });
 
 test('invalid early match, round advance, and unknown ids fail loudly', () => {

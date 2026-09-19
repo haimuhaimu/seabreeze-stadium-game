@@ -233,12 +233,31 @@ function validSnapshot(snapshot) {
     && ['attack', 'defense', 'cohesion', 'facility', 'cash'].every(key => Number.isFinite(snapshot[key]));
 }
 
+export const OUTLOOK_WEIGHTS = Object.freeze({
+  cohesion: 0.26,
+  facility: 0.16,
+  construction: 0.85
+});
+
+export const CONCEDED_GOAL_STEP = 9;
+export const MAX_CONCEDED_GOALS = 3;
+
 function teamRating(snapshot, projects) {
   const projectTotal = Object.values(projects).reduce((sum, value) => sum + value, 0);
   return (snapshot.attack + snapshot.defense) / 2
-    + (snapshot.cohesion - 50) * 0.18
-    + (snapshot.facility - 50) * 0.08
-    + projectTotal * 0.7;
+    + (snapshot.cohesion - 50) * OUTLOOK_WEIGHTS.cohesion
+    + (snapshot.facility - 50) * OUTLOOK_WEIGHTS.facility
+    + projectTotal * OUTLOOK_WEIGHTS.construction;
+}
+
+export function getMatchOutlook(snapshot, projects, opponentDifficulty) {
+  if (!validSnapshot(snapshot)) throw new TypeError('Invalid season team snapshot');
+  if (!projects || typeof projects !== 'object') throw new TypeError('Invalid project levels');
+  if (!Number.isFinite(opponentDifficulty)) throw new TypeError('Invalid opponent difficulty');
+  const rating = teamRating(snapshot, projects);
+  const gap = opponentDifficulty - rating;
+  const concededGoals = clamp(Math.floor(gap / CONCEDED_GOAL_STEP), 0, MAX_CONCEDED_GOALS);
+  return { rating, gap, concededGoals };
 }
 
 export function startSeasonMatch(state, snapshot) {
@@ -248,13 +267,13 @@ export function startSeasonMatch(state, snapshot) {
   const round = getSeasonRound(next.roundIndex);
   const opponent = getLeagueTeam(round.playerOpponentId);
   const difficulty = opponent.strength + Math.max(0, next.seasonNumber - 1) * 2;
-  const gap = difficulty - teamRating(snapshot, next.projects);
+  const outlook = getMatchOutlook(snapshot, next.projects, difficulty);
   next.match = {
     opponentId: opponent.id,
     playerHome: round.playerHome,
     highlightIndex: 0,
     homeGoals: 0,
-    awayGoals: gap >= 18 ? 2 : gap >= 8 ? 1 : 0,
+    awayGoals: outlook.concededGoals,
     choices: [],
     callbackIds: [],
     complete: false,
