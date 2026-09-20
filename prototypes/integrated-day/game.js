@@ -400,11 +400,17 @@ function formatTime(minutes) {
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 }
 
+let storageWriteBlocked = false;
 function persist() {
   if (!hasStarted) return;
   state.world.mapId = activeMapId;
   state.world.positions[activeMapId] = { ...position };
-  writeSave(localStorage, state, position, activeMapId);
+  const result = writeSave(localStorage, state, position, activeMapId);
+  if (!result.ok && !storageWriteBlocked) {
+    storageWriteBlocked = true;
+    const warning = document.querySelector('[data-storage-warning]');
+    if (warning) warning.hidden = false;
+  }
   lastPositionSave = performance.now();
 }
 
@@ -416,10 +422,19 @@ function isShopReady() {
   return hasIngredients(state.inventory, requiredInventoryForDay(state.dayIndex));
 }
 
+const viewMetrics = { planeWidth: 0, planeHeight: 0, viewportWidth: 0, viewportHeight: 0 };
+
+function refreshViewMetrics() {
+  viewMetrics.planeWidth = plane.clientWidth;
+  viewMetrics.planeHeight = plane.clientHeight;
+  viewMetrics.viewportWidth = viewport.clientWidth;
+  viewMetrics.viewportHeight = viewport.clientHeight;
+}
+
 function toPixels(point) {
   return {
-    x: point.x * plane.clientWidth / 100,
-    y: point.y * plane.clientHeight / 100
+    x: point.x * viewMetrics.planeWidth / 100,
+    y: point.y * viewMetrics.planeHeight / 100
   };
 }
 
@@ -2314,8 +2329,8 @@ function updateDirection(dx, dy) {
 
 function tryMove(dxPixels, dyPixels) {
   if (!dxPixels && !dyPixels) return false;
-  const nextX = position.x + dxPixels / plane.clientWidth * 100;
-  const nextY = position.y + dyPixels / plane.clientHeight * 100;
+  const nextX = position.x + dxPixels / viewMetrics.planeWidth * 100;
+  const nextY = position.y + dyPixels / viewMetrics.planeHeight * 100;
   let changed = false;
 
   if (canStand(nextX, position.y)) {
@@ -2401,8 +2416,8 @@ function advanceMovement(deltaSeconds, timestamp) {
 }
 
 function updatePlayerVisual() {
-  player.style.setProperty('--screen-x', `${position.x * plane.clientWidth / 100}px`);
-  player.style.setProperty('--screen-y', `${position.y * plane.clientHeight / 100}px`);
+  player.style.setProperty('--screen-x', `${position.x * viewMetrics.planeWidth / 100}px`);
+  player.style.setProperty('--screen-y', `${position.y * viewMetrics.planeHeight / 100}px`);
 }
 
 function clamp(value, min, max) {
@@ -2410,23 +2425,20 @@ function clamp(value, min, max) {
 }
 
 function fitWorld() {
-  const viewportWidth = viewport.clientWidth;
-  const viewportHeight = viewport.clientHeight;
   const map = getMap(activeMapId);
-  const scale = Math.max(viewportWidth / map.width, viewportHeight / map.height);
+  const scale = Math.max(viewMetrics.viewportWidth / map.width, viewMetrics.viewportHeight / map.height);
   plane.style.width = `${Math.ceil(map.width * scale)}px`;
   plane.style.height = `${Math.ceil(map.height * scale)}px`;
+  refreshViewMetrics();
   updatePlayerVisual();
   updateCamera();
 }
 
 function updateCamera() {
-  const viewportWidth = viewport.clientWidth;
-  const viewportHeight = viewport.clientHeight;
-  const focusX = position.x * plane.clientWidth / 100;
-  const focusY = position.y * plane.clientHeight / 100;
-  const cameraX = clamp(viewportWidth / 2 - focusX, viewportWidth - plane.clientWidth, 0);
-  const cameraY = clamp(viewportHeight / 2 - focusY, viewportHeight - plane.clientHeight, 0);
+  const focusX = position.x * viewMetrics.planeWidth / 100;
+  const focusY = position.y * viewMetrics.planeHeight / 100;
+  const cameraX = clamp(viewMetrics.viewportWidth / 2 - focusX, viewMetrics.viewportWidth - viewMetrics.planeWidth, 0);
+  const cameraY = clamp(viewMetrics.viewportHeight / 2 - focusY, viewMetrics.viewportHeight - viewMetrics.planeHeight, 0);
   plane.style.setProperty('--camera-x', `${cameraX}px`);
   plane.style.setProperty('--camera-y', `${cameraY}px`);
 }
@@ -2436,17 +2448,24 @@ function pointerAt(timestamp) {
   return cycle <= 0.5 ? cycle * 2 : 2 - cycle * 2;
 }
 
+let visualDirty = true;
+
 function frame(timestamp) {
   const delta = Math.min(0.04, Math.max(0, (timestamp - lastFrame) / 1000));
   lastFrame = timestamp;
   advanceMovement(delta, timestamp);
   if (trainingActive && !reducedMotion.matches) {
     trainingPointer = pointerAt(timestamp);
-    document.querySelector('[data-training-pointer]').style.left = `${trainingPointer * 100}%`;
+    const pointer = document.querySelector('[data-training-pointer]');
+    if (pointer) pointer.style.left = `${trainingPointer * 100}%`;
+    visualDirty = true;
   }
-  updatePlayerVisual();
-  updateCamera();
-  if (state.phase === 'morning') updateProximity();
+  if (moving || destination || visualDirty) {
+    updatePlayerVisual();
+    updateCamera();
+    if (state.phase === 'morning') updateProximity();
+    visualDirty = moving || Boolean(destination);
+  }
   requestAnimationFrame(frame);
 }
 

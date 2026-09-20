@@ -1008,6 +1008,30 @@ async function testThreeDayLoop() {
   assert(await evaluate('window.__integratedDayDebug.getState().season.elite.bestResultId === "champion"'), 'The elite best result did not persist');
 }
 
+async function testStorageBlocked() {
+  await evaluate(`(() => {
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem() { throw new Error('SecurityError: local storage is blocked'); },
+        setItem() { throw new Error('SecurityError'); },
+        removeItem() { throw new Error('SecurityError'); }
+      }
+    });
+    return true;
+  })()`);
+  const fromMap = await evaluate('window.__integratedDayDebug.getMapId()');
+  const exitId = fromMap === 'training' ? 'to-stadium' : 'to-training';
+  const targetMap = fromMap === 'training' ? 'stadium' : 'training';
+  await walkAndWait(exitId, `window.__integratedDayDebug.getMapId() === '${targetMap}'`);
+  await waitFor(
+    `(() => { const w = document.querySelector('[data-storage-warning]'); return w && !w.hidden && w.textContent.includes('不会被保存'); })()`,
+    'A blocked save did not show the persistent warning while play continued',
+    12000
+  );
+  assert(await evaluate('Boolean(window.__integratedDayDebug)'), 'The game became unusable after storage writes failed');
+}
+
 let exitCode = 0;
 try {
   await send('Page.enable');
@@ -1033,6 +1057,8 @@ try {
   console.log('PASS repeatable league round, authored incident, remembered NPC response, construction, match, and standings');
   console.log('PASS visible construction stages, facility visits, and NPC relocation');
   console.log('PASS qualified elite invitation, preparation callbacks, permanent result, and next season');
+  await testStorageBlocked();
+  console.log('PASS blocked storage keeps the game playable and warns once');
   assert(pageErrors.length === 0, `Browser errors: ${pageErrors.join(' | ')}`);
   console.log('PASS browser console');
 } catch (error) {

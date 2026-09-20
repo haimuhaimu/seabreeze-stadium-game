@@ -1149,6 +1149,25 @@ kbd {
   animation: toast-in 210ms var(--ease) both;
 }
 
+.storage-warning {
+  position: fixed;
+  z-index: 31;
+  left: 20px;
+  bottom: 24px;
+  max-width: min(390px, calc(100vw - 40px));
+  margin: 0;
+  padding: 9px 12px;
+  border-left: 3px solid #e0b15f;
+  border-radius: 3px 9px 9px 3px;
+  background: rgb(32 30 17 / 96%);
+  color: #f4e4bb;
+  box-shadow: 0 5px 0 rgb(4 9 6 / 30%), 0 14px 28px rgb(4 9 6 / 24%);
+  font-size: 11px;
+  line-height: 1.45;
+  pointer-events: none;
+  animation: toast-in 210ms var(--ease) both;
+}
+
 .touch-controls,
 .touch-action { display: none; }
 
