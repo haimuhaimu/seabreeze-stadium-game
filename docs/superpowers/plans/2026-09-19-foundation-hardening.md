@@ -68,25 +68,25 @@ Commit: `feat: map team rating to conceded goals continuously`
 - Produces: `CONSTRUCTION_MILESTONES`、`getConstructionUnlocks(projects)` 返回 `{ extraMoment, forgiveOpening, fullBuild }`。
 - Adds: `MATCH_MOMENTS` 第四个时刻与满建设专属时刻，均带 `requiresLevels`。
 
-- [ ] **Step 1: Write failing milestone tests**
+- [x] **Step 1: Write failing milestone tests**
 
 断言 6 级解锁第四时刻且进球上限升到 4、10 级后首个时刻未命中不再额外送球、15 级解锁专属时刻并写入赛季结算记录，以及 5 级、9 级、14 级各自不解锁。新时刻的每个选项都必须带 callback 字段。
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 Run: `node --test prototypes/integrated-day/season-content.test.mjs prototypes/integrated-day/season-state.test.mjs`
 
 Expected: 里程碑导出与新时刻缺失。
 
-- [ ] **Step 3: Implement milestone-gated moments**
+- [x] **Step 3: Implement milestone-gated moments**
 
 按建设总级数派生可用时刻序列，`resolveSeasonMatchMoment` 的未命中惩罚受 10 级容错影响，满建设记录写入 `roundHistory`。不新增存档字段。
 
-- [ ] **Step 4: Run focused tests and verify GREEN**
+- [x] **Step 4: Run focused tests and verify GREEN**
 
 Run the same focused command. Expected: all pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Commit: `feat: unlock match moments from stadium construction`
 
