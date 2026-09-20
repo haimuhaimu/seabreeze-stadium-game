@@ -237,3 +237,53 @@ test('an interrupted elite match returns to its invitation without duplicating r
   assert.equal(loaded.record.state.season.elite.result, null);
   assert.deepEqual(loaded.record.state.season.elite.history, []);
 });
+
+test('a blocked storage reads as absent instead of crashing the page', () => {
+  const blocked = {
+    getItem: () => { throw new Error('SecurityError: local storage is blocked'); },
+    setItem: () => { throw new Error('SecurityError'); },
+    removeItem: () => { throw new Error('SecurityError'); }
+  };
+  assert.deepEqual(loadSave(blocked), { ok: false, reason: 'storage-unavailable' });
+});
+
+test('a quota failure is reported instead of interrupting play', () => {
+  let writes = 0;
+  const quotaFull = {
+    getItem: () => null,
+    setItem: () => {
+      writes += 1;
+      const error = new Error('QuotaExceededError');
+      error.name = 'QuotaExceededError';
+      throw error;
+    },
+    removeItem: () => {}
+  };
+  const result = writeSave(quotaFull, createGameState(), { x: 10, y: 20 });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'write-failed');
+  assert.equal(writes, 1, 'a failed write must not retry in a loop');
+});
+
+test('a successful write reports the stored record', () => {
+  const storage = memoryStorage();
+  const state = createGameState();
+  const result = writeSave(storage, state, { x: 12, y: 34 });
+  assert.equal(result.ok, true);
+  assert.equal(result.record.version, 5);
+  assert.equal(loadSave(storage).record.position.x, 12);
+});
+
+test('clearing a storage that throws stays non-fatal', () => {
+  const throwing = {
+    getItem: () => null,
+    setItem: () => {},
+    removeItem: () => { throw new Error('SecurityError'); }
+  };
+  assert.doesNotThrow(() => clearSave(throwing));
+});
+
+test('an invalid save record is still a programming error, not a storage failure', () => {
+  const storage = memoryStorage();
+  assert.throws(() => writeSave(storage, {}, { x: 0, y: 0 }), /Invalid save record/);
+});

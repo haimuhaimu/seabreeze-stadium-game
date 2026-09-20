@@ -303,36 +303,54 @@ function loadAndValidate(raw, version) {
   return parsed;
 }
 
+function safeGetItem(storage, key) {
+  try {
+    return { available: true, value: storage.getItem(key) };
+  } catch {
+    return { available: false };
+  }
+}
+
 export function loadSave(storage) {
-  const currentRaw = storage.getItem(SAVE_KEY);
+  const current = safeGetItem(storage, SAVE_KEY);
+  if (!current.available) return { ok: false, reason: 'storage-unavailable' };
+  const currentRaw = current.value;
   if (currentRaw !== null) {
     const loaded = loadAndValidate(currentRaw, 5);
     if (!loaded.ok) return loaded;
     return { ok: true, record: closeInterruptedActivities(loaded.record) };
   }
 
-  const versionFourRaw = storage.getItem(V4_SAVE_KEY);
+  const versionFour = safeGetItem(storage, V4_SAVE_KEY);
+  if (!versionFour.available) return { ok: false, reason: 'storage-unavailable' };
+  const versionFourRaw = versionFour.value;
   if (versionFourRaw !== null) {
     const loaded = loadAndValidate(versionFourRaw, 4);
     if (!loaded.ok) return loaded;
     return { ok: true, record: closeInterruptedActivities(migrateV4Record(loaded.record)), migrated: true };
   }
 
-  const versionThreeRaw = storage.getItem(V3_SAVE_KEY);
+  const versionThree = safeGetItem(storage, V3_SAVE_KEY);
+  if (!versionThree.available) return { ok: false, reason: 'storage-unavailable' };
+  const versionThreeRaw = versionThree.value;
   if (versionThreeRaw !== null) {
     const loaded = loadAndValidate(versionThreeRaw, 3);
     if (!loaded.ok) return loaded;
     return { ok: true, record: closeInterruptedActivities(migrateV3Record(loaded.record)), migrated: true };
   }
 
-  const versionTwoRaw = storage.getItem(V2_SAVE_KEY);
+  const versionTwo = safeGetItem(storage, V2_SAVE_KEY);
+  if (!versionTwo.available) return { ok: false, reason: 'storage-unavailable' };
+  const versionTwoRaw = versionTwo.value;
   if (versionTwoRaw !== null) {
     const loaded = loadAndValidate(versionTwoRaw, 2);
     if (!loaded.ok) return loaded;
     return { ok: true, record: closeInterruptedActivities(migrateV2Record(loaded.record)), migrated: true };
   }
 
-  const legacyRaw = storage.getItem(LEGACY_SAVE_KEY);
+  const legacy = safeGetItem(storage, LEGACY_SAVE_KEY);
+  if (!legacy.available) return { ok: false, reason: 'storage-unavailable' };
+  const legacyRaw = legacy.value;
   if (legacyRaw === null) return { ok: false, reason: 'absent' };
   const loaded = loadAndValidate(legacyRaw, 1);
   if (!loaded.ok) return loaded;
@@ -342,14 +360,20 @@ export function loadSave(storage) {
 export function writeSave(storage, state, position, mapId = state.world?.mapId ?? 'training') {
   const record = { version: 5, state, position, mapId };
   if (!validateSaveRecord(record)) throw new TypeError('Invalid save record');
-  storage.setItem(SAVE_KEY, JSON.stringify(record));
-  return record;
+  try {
+    storage.setItem(SAVE_KEY, JSON.stringify(record));
+  } catch {
+    return { ok: false, reason: 'write-failed' };
+  }
+  return { ok: true, record };
 }
 
 export function clearSave(storage) {
-  storage.removeItem(SAVE_KEY);
-  storage.removeItem(V4_SAVE_KEY);
-  storage.removeItem(V3_SAVE_KEY);
-  storage.removeItem(V2_SAVE_KEY);
-  storage.removeItem(LEGACY_SAVE_KEY);
+  for (const key of [SAVE_KEY, V4_SAVE_KEY, V3_SAVE_KEY, V2_SAVE_KEY, LEGACY_SAVE_KEY]) {
+    try {
+      storage.removeItem(key);
+    } catch {
+      // Storage may reject removal in a blocked context; clearing is best effort.
+    }
+  }
 }
