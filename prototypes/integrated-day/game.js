@@ -79,8 +79,9 @@ import {
   getNamingDay,
   getNamingScene
 } from './naming-rights-content.js';
-import { getSeasonEliteMoment, getSeasonMatchMoment, getSeasonGoalStatus, getStandings, getMatchOutlook } from './season-state.js';
+import { getSeasonEliteMoment, getSeasonMatchMoment, getSeasonGoalStatus, getStandings, getMatchOutlook, getConstructionUnlocks } from './season-state.js';
 import {
+  CONSTRUCTION_MILESTONES,
   SEASON_ACTIONS,
   SEASON_GOALS,
   SEASON_PROJECTS,
@@ -1393,17 +1394,35 @@ function renderMatchOutlook() {
 
   const levels = Object.values(state.season.projects).reduce((sum, value) => sum + value, 0);
   const edge = -outlook.gap;
-  document.querySelector('[data-outlook-construction]').textContent = `建设 ${levels} 级`;
+  const unlocks = getConstructionUnlocks(state.season.projects);
+  const nextMilestone = [
+    CONSTRUCTION_MILESTONES.extraMoment,
+    CONSTRUCTION_MILESTONES.forgiveOpening,
+    CONSTRUCTION_MILESTONES.fullBuild
+  ].find(target => levels < target) ?? null;
+
+  document.querySelector('[data-outlook-construction]').textContent = nextMilestone === null
+    ? `建设 ${levels} 级 · 已建成`
+    : `建设 ${levels} 级 · 距 ${nextMilestone} 级还差 ${nextMilestone - levels}`;
   document.querySelector('[data-outlook-deficit]').textContent = outlook.concededGoals === 0
     ? '开场不落后'
     : `开场落后 ${outlook.concededGoals} 球`;
   document.querySelector('[data-outlook-edge]').textContent = edge >= 0
     ? `实力领先 ${edge.toFixed(1)}`
     : `实力落后 ${Math.abs(edge).toFixed(1)}`;
-  document.querySelector('[data-outlook-summary]').textContent = outlook.concededGoals === 0
-    ? `这一周准备的东西，够对上${opponent.name}`
-    : `${opponent.name}比现在的海风队更完整`;
+  document.querySelector('[data-outlook-summary]').textContent = unlockSummary(unlocks, nextMilestone);
   outlookLine.classList.toggle('behind', outlook.concededGoals > 0);
+}
+
+function unlockSummary(unlocks, nextMilestone) {
+  if (unlocks.fullBuild) return '整座球场都在使用，比赛里有五个时刻可以回应';
+  if (nextMilestone === CONSTRUCTION_MILESTONES.forgiveOpening) {
+    return unlocks.extraMoment
+      ? '再建到 10 级，开场准备不足时不会被追加失球'
+      : `再建到 ${nextMilestone} 级，球场会在比赛里多给一次机会`;
+  }
+  if (nextMilestone === CONSTRUCTION_MILESTONES.fullBuild) return '建完最后几级，球场会有属于自己的比赛时刻';
+  return `再建到 ${CONSTRUCTION_MILESTONES.extraMoment} 级，比赛里会多出一个可以回应的时刻`;
 }
 
 function renderSeasonDocket() {

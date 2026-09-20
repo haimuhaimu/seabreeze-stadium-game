@@ -934,7 +934,8 @@ async function testThreeDayLoop() {
     const read = () => ({
       deficit: document.querySelector('[data-outlook-deficit]').textContent,
       edge: document.querySelector('[data-outlook-edge]').textContent,
-      levels: document.querySelector('[data-outlook-construction]').textContent
+      levels: document.querySelector('[data-outlook-construction]').textContent,
+      summary: document.querySelector('[data-outlook-summary]').textContent
     });
     const debug = window.__integratedDayDebug;
     debug.setSeasonProjects({ stands: 1, clinic: 1, academy: 0, market: 0, lights: 0 });
@@ -946,6 +947,9 @@ async function testThreeDayLoop() {
   })()`);
   assert(outlookShift.low.levels.includes('2') && outlookShift.high.levels.includes('15'), `The outlook does not follow construction levels: ${JSON.stringify(outlookShift)}`);
   assert(outlookShift.low.edge !== outlookShift.high.edge, `Construction must visibly change the strength edge: ${JSON.stringify(outlookShift)}`);
+  assert(outlookShift.low.levels.includes('还差'), `A partial build must show the distance to the next milestone: ${JSON.stringify(outlookShift)}`);
+  assert(outlookShift.high.levels.includes('已建成'), `A finished stadium must report itself as complete: ${JSON.stringify(outlookShift)}`);
+  assert(outlookShift.low.summary !== outlookShift.high.summary, `The milestone summary must change with construction: ${JSON.stringify(outlookShift)}`);
 
   await send('Emulation.setDeviceMetricsOverride', {
     width: 390,
