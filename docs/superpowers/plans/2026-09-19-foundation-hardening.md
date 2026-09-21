@@ -135,27 +135,27 @@ Commit: `feat: show match outlook before kickoff`
 **Interfaces:**
 - Changes: `writeSave` 返回 `{ ok, record, reason }`，不再抛出存储异常；`loadSave` 在读取异常时返回 `{ ok: false, reason: 'storage-unavailable' }`。
 
-- [ ] **Step 1: Write failing storage-failure tests**
+- [x] **Step 1: Write failing storage-failure tests**
 
 用会抛 SecurityError 的 `getItem` 和抛 QuotaExceededError 的 `setItem` 断言两者都不向上抛出、返回正确 reason，且非法存档记录仍然抛 TypeError（该校验属于编程错误，行为不变）。
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run: `node --test prototypes/integrated-day/save-game.test.mjs`
 
 Expected: 异常直接冒泡，测试失败。
 
-- [ ] **Step 3: Implement the safe storage layer**
+- [x] **Step 3: Implement the safe storage layer**
 
 在 `save-game.js` 内包裹读写，`game.js` 的 `persist()` 在首次写入失败时提示一次并切换为内存存档，后续不重复提示。
 
-- [ ] **Step 4: Run focused test and smoke test**
+- [x] **Step 4: Run focused test and smoke test**
 
 Run: `node --test prototypes/integrated-day/save-game.test.mjs` 与 `node --experimental-websocket prototypes/integrated-day/smoke-test.mjs`
 
 Expected: 单测通过；浏览器验收在禁用存储的上下文里可走到赛季结算并显示提示。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Commit: `fix: keep playing when local storage is unavailable`
 
@@ -171,27 +171,27 @@ Commit: `fix: keep playing when local storage is unavailable`
 **Interfaces:**
 - No production interface change; 仅补测与内部缓存。
 
-- [ ] **Step 1: Write the four module test suites**
+- [x] **Step 1: Write the four module test suites**
 
 覆盖正常值、边界截断与非法输入：账目去重与欠款三条路线、训练重心不可重复选择与属性累加、设施状况上限截断、治理支持与沈峤影响的 0 至 5 截断。
 
-- [ ] **Step 2: Run the new tests and verify they pass or expose real bugs**
+- [x] **Step 2: Run the new tests and verify they pass or expose real bugs**
 
 Run: `node --test prototypes/integrated-day/economy-state.test.mjs prototypes/integrated-day/roster-state.test.mjs prototypes/integrated-day/facility-state.test.mjs prototypes/integrated-day/governance-state.test.mjs`
 
 Expected: 全部通过；若暴露真实缺陷，先修实现再继续。
 
-- [ ] **Step 3: Cache layout metrics and skip idle frames**
+- [x] **Step 3: Cache layout metrics and skip idle frames**
 
 缓存地图与视口尺寸，只在 resize、地图切换和 `fitWorld` 时失效；角色静止且无训练动画时跳过视觉更新。保持 reduced-motion 行为不变。
 
-- [ ] **Step 4: Verify movement, camera, and click-to-walk still work**
+- [x] **Step 4: Verify movement, camera, and click-to-walk still work**
 
 Run: `node --experimental-websocket prototypes/integrated-day/smoke-test.mjs`
 
 Expected: 两地往返、点击寻路、跨看台通道与移动端按钮全部通过。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Commit: `test: cover base state modules and idle frames`
 
@@ -201,28 +201,28 @@ Commit: `test: cover base state modules and idle frames`
 - Modify: `README.md`
 - Modify: `prototypes/integrated-day/README.md`
 
-- [ ] **Step 1: Update the playable feature description**
+- [x] **Step 1: Update the playable feature description**
 
 说明建设三个节点的解锁内容、赛前局势显示，以及本地存储不可用时的降级行为。
 
-- [ ] **Step 2: Run the full pure suite**
+- [x] **Step 2: Run the full pure suite**
 
 Run: `node --test prototypes/integrated-day/*.test.mjs`
 
 Expected: 全部通过，零失败。
 
-- [ ] **Step 3: Run the full browser smoke suite**
+- [x] **Step 3: Run the full browser smoke suite**
 
 Run: `node --experimental-websocket prototypes/integrated-day/smoke-test.mjs`
 
 Expected: 剧情、联赛、建设、精英赛、布局与控制台检查全部通过。
 
-- [ ] **Step 4: Check repository boundaries**
+- [x] **Step 4: Check repository boundaries**
 
 Run: `git diff --check` 与 `git status --short`
 
 Expected: 无空白错误；只剩已知的用户未跟踪文件。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Commit: `docs: explain the hardened foundation`
