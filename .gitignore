@@ -1,0 +1,14 @@
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Node
+node_modules/
+
+# 构建产物 / 日志
+dist/
+*.log
+
+# 编辑器
+.vscode/
+.idea/
