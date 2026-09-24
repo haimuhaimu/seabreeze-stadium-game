@@ -61,7 +61,7 @@
 
 ## 验证
 
-全部纯规则测试：
+全部自动化测试：
 
 ```bash
 node --test prototypes/integrated-day/*.test.mjs
@@ -72,6 +72,8 @@ node --test prototypes/integrated-day/*.test.mjs
 ```bash
 node --experimental-websocket prototypes/integrated-day/smoke-test.mjs
 ```
+
+浏览器验收会优先读取 `CHROME_PATH`，否则从 `PATH` 和 macOS、Linux、Windows 的常见安装位置寻找 Chrome 或 Chromium。
 
 如果验收启动时报 `Address already in use`，先结束占用调试端口的 Chrome，再重跑：
 

@@ -1,11 +1,14 @@
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { extname, join, resolve } from 'node:path';
+import { resolveChromePath } from './chrome-path.js';
 import { getOrders } from './daily-content.js';
+import { pollForValue } from './poll-for-value.js';
+import { writeSmokeArtifact } from './smoke-artifact.js';
 
-const chromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const chromePath = resolveChromePath();
 const mimeTypes = { '.css': 'text/css', '.html': 'text/html', '.js': 'text/javascript', '.png': 'image/png' };
 const server = createServer(async (request, response) => {
   try {
@@ -49,15 +52,16 @@ chrome.stderr.on('data', chunk => { chromeError += chunk.toString(); });
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function waitForDebugger() {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
+  const debuggerUrl = await pollForValue(async () => {
     try {
       const response = await fetch(`http://127.0.0.1:${debugPort}/json/list`);
       const pages = await response.json();
       const page = pages.find(item => item.type === 'page' && item.url.startsWith(pageBaseUrl));
-      if (page?.webSocketDebuggerUrl) return page.webSocketDebuggerUrl;
+      return page?.webSocketDebuggerUrl;
     } catch {}
-    await sleep(100);
-  }
+    return undefined;
+  });
+  if (debuggerUrl) return debuggerUrl;
   throw new Error(`Chrome DevTools did not start. ${chromeError}`);
 }
 
@@ -180,7 +184,7 @@ async function text(selector) {
 async function capture(name) {
   await sleep(350);
   const shot = await send('Page.captureScreenshot', { format: 'png', fromSurface: true });
-  await writeFile(`/private/tmp/integrated-day-${name}.png`, Buffer.from(shot.data, 'base64'));
+  await writeSmokeArtifact(name, Buffer.from(shot.data, 'base64'));
 }
 
 async function walkAndWait(id, condition) {
