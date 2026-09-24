@@ -1,12 +1,17 @@
-import { migrateV1Record, migrateV2Record } from './save-migration.js';
+import { migrateV1Record, migrateV2Record, migrateV3Record, migrateV4Record } from './save-migration.js';
+import { cloneSeasonState } from './season-state.js';
 
-export const SAVE_KEY = 'seabreeze-club-save-v3';
+export const SAVE_KEY = 'seabreeze-club-save-v5';
+export const V4_SAVE_KEY = 'seabreeze-club-save-v4';
+export const V3_SAVE_KEY = 'seabreeze-club-save-v3';
 export const V2_SAVE_KEY = 'seabreeze-club-save-v2';
 export const LEGACY_SAVE_KEY = 'seabreeze-club-save-v1';
 
 const PHASES = new Set(['morning', 'shop', 'evening', 'complete']);
 const REPAIR_IDS = new Set(['net', 'awning', 'bleachers']);
 const MAP_IDS = new Set(['training', 'stadium']);
+const SEASON_PROJECT_IDS = ['stands', 'clinic', 'academy', 'market', 'lights'];
+const SEASON_NPC_IDS = ['coach-guo', 'lin-chuan', 'aunt-xu', 'xiaoman', 'shen-qiao', 'director-luo'];
 
 function isFiniteNonNegative(value) {
   return Number.isFinite(value) && value >= 0;
@@ -99,6 +104,29 @@ function validEpisode(episode) {
   );
 }
 
+function validNamingRights(namingRights) {
+  const validMatch = namingRights?.match === null || Boolean(
+    Number.isInteger(namingRights.match.highlightIndex)
+    && isFiniteNonNegative(namingRights.match.homeGoals)
+    && isFiniteNonNegative(namingRights.match.awayGoals)
+    && Array.isArray(namingRights.match.choices)
+    && Array.isArray(namingRights.match.callbackIds)
+    && typeof namingRights.match.complete === 'boolean'
+  );
+  return Boolean(
+    namingRights?.id === 'naming-rights'
+    && Array.isArray(namingRights.sceneHistory)
+    && namingRights.freeTime
+    && Array.isArray(namingRights.freeTime.records)
+    && (namingRights.freeTime.activeAction === null || typeof namingRights.freeTime.activeAction === 'object')
+    && (namingRights.voteRoute === null || ['co-name', 'community-save', 'delay'].includes(namingRights.voteRoute))
+    && (namingRights.response === null || ['restore-history', 'name-as-repair', 'after-match'].includes(namingRights.response))
+    && typeof namingRights.weekComplete === 'boolean'
+    && validMatch
+    && (namingRights.settlement === null || typeof namingRights.settlement === 'object')
+  );
+}
+
 function validV1Record(record) {
   return Boolean(
     record
@@ -131,11 +159,91 @@ function validV3State(state) {
   );
 }
 
-export function validateSaveRecord(record) {
+function validV3Record(record) {
   return Boolean(
     record
     && record.version === 3
     && validV3State(record.state)
+    && validPosition(record.position)
+    && MAP_IDS.has(record.mapId)
+  );
+}
+
+function validV4State(state) {
+  return Boolean(
+    state?.version === 4
+    && validPrologueFields(state, 16)
+    && validManagementState(state)
+    && validEpisode(state.episode)
+    && validNamingRights(state.namingRights)
+  );
+}
+
+function validSeasonMatch(match) {
+  return match === null || Boolean(
+    match
+    && typeof match.opponentId === 'string'
+    && typeof match.playerHome === 'boolean'
+    && Number.isInteger(match.highlightIndex)
+    && isFiniteNonNegative(match.homeGoals)
+    && isFiniteNonNegative(match.awayGoals)
+    && Array.isArray(match.choices)
+    && Array.isArray(match.callbackIds)
+    && typeof match.complete === 'boolean'
+    && match.snapshot
+    && ['attack', 'defense', 'cohesion', 'facility', 'cash'].every(key => Number.isFinite(match.snapshot[key]))
+  );
+}
+
+function validSeason(season) {
+  return Boolean(
+    season?.id === 'haifeng-league'
+    && typeof season.active === 'boolean'
+    && Number.isInteger(season.seasonNumber)
+    && season.seasonNumber >= 0
+    && Number.isInteger(season.roundIndex)
+    && season.roundIndex >= 0
+    && season.roundIndex <= 6
+    && season.week
+    && Array.isArray(season.week.actions)
+    && Array.isArray(season.week.talkedNpcIds)
+    && season.week.npcResponses
+    && typeof season.week.npcResponses === 'object'
+    && Array.isArray(season.week.helpTags)
+    && (season.week.visitedProjectIds === undefined || (
+      Array.isArray(season.week.visitedProjectIds)
+      && season.week.visitedProjectIds.every(id => SEASON_PROJECT_IDS.includes(id))
+    ))
+    && typeof season.week.roundComplete === 'boolean'
+    && SEASON_PROJECT_IDS.every(id => Number.isInteger(season.projects?.[id]) && season.projects[id] >= 0 && season.projects[id] <= 3)
+    && SEASON_NPC_IDS.every(id => Number.isInteger(season.relationships?.[id]) && season.relationships[id] >= 0 && season.relationships[id] <= 5)
+    && Array.isArray(season.standings)
+    && season.standings.length === 8
+    && season.standings.every(row => row && typeof row.teamId === 'string' && Number.isInteger(row.played) && isFiniteNonNegative(row.points))
+    && validSeasonMatch(season.match)
+    && Array.isArray(season.roundHistory)
+    && typeof season.seasonComplete === 'boolean'
+    && typeof season.eliteQualified === 'boolean'
+    && (season.goals === null || typeof season.goals === 'object')
+  );
+}
+
+function validV5State(state) {
+  return Boolean(
+    state?.version === 5
+    && validPrologueFields(state, 23)
+    && validManagementState(state)
+    && validEpisode(state.episode)
+    && validNamingRights(state.namingRights)
+    && validSeason(state.season)
+  );
+}
+
+export function validateSaveRecord(record) {
+  return Boolean(
+    record
+    && record.version === 5
+    && validV5State(record.state)
     && validPosition(record.position)
     && MAP_IDS.has(record.mapId)
   );
@@ -152,13 +260,28 @@ function parseRecord(raw) {
 function closeInterruptedActivities(record) {
   const trainingStarted = record.state.training.started;
   const episodeStarted = Boolean(record.state.episode.activePromise);
-  if (!trainingStarted && !episodeStarted) return record;
+  const freeActionStarted = Boolean(record.state.namingRights?.freeTime?.activeAction);
+  const season = cloneSeasonState(record.state.season);
+  const seasonMatchStarted = Boolean(season.match && !season.week.roundComplete);
+  const eliteMatchStarted = season.elite.status === 'match';
+  if (seasonMatchStarted) season.match = null;
+  if (eliteMatchStarted) {
+    season.elite.status = 'invited';
+    season.elite.preparationId = null;
+    season.elite.match = null;
+    season.elite.result = null;
+  }
   return {
     ...record,
     state: {
       ...record.state,
-      training: { ...record.state.training, started: false },
-      episode: { ...record.state.episode, activePromise: null }
+      training: trainingStarted ? { ...record.state.training, started: false } : record.state.training,
+      episode: episodeStarted ? { ...record.state.episode, activePromise: null } : record.state.episode,
+      namingRights: freeActionStarted && record.state.namingRights ? {
+        ...record.state.namingRights,
+        freeTime: { ...record.state.namingRights.freeTime, activeAction: null, available: true }
+      } : record.state.namingRights,
+      season
     }
   };
 }
@@ -167,31 +290,67 @@ function loadAndValidate(raw, version) {
   const parsed = parseRecord(raw);
   if (!parsed.ok) return parsed;
   if (!parsed.record || parsed.record.version !== version) return { ok: false, reason: 'unsupported-version' };
-  const valid = version === 3
+  const valid = version === 5
     ? validateSaveRecord(parsed.record)
-    : version === 2
-      ? validV2Record(parsed.record)
-      : validV1Record(parsed.record);
+    : version === 4
+      ? Boolean(validV4State(parsed.record.state) && validPosition(parsed.record.position) && MAP_IDS.has(parsed.record.mapId))
+      : version === 3
+      ? validV3Record(parsed.record)
+      : version === 2
+        ? validV2Record(parsed.record)
+        : validV1Record(parsed.record);
   if (!valid) return { ok: false, reason: 'invalid-shape' };
   return parsed;
 }
 
+function safeGetItem(storage, key) {
+  try {
+    return { available: true, value: storage.getItem(key) };
+  } catch {
+    return { available: false };
+  }
+}
+
 export function loadSave(storage) {
-  const currentRaw = storage.getItem(SAVE_KEY);
+  const current = safeGetItem(storage, SAVE_KEY);
+  if (!current.available) return { ok: false, reason: 'storage-unavailable' };
+  const currentRaw = current.value;
   if (currentRaw !== null) {
-    const loaded = loadAndValidate(currentRaw, 3);
+    const loaded = loadAndValidate(currentRaw, 5);
     if (!loaded.ok) return loaded;
     return { ok: true, record: closeInterruptedActivities(loaded.record) };
   }
 
-  const versionTwoRaw = storage.getItem(V2_SAVE_KEY);
+  const versionFour = safeGetItem(storage, V4_SAVE_KEY);
+  if (!versionFour.available) return { ok: false, reason: 'storage-unavailable' };
+  const versionFourRaw = versionFour.value;
+  if (versionFourRaw !== null) {
+    const loaded = loadAndValidate(versionFourRaw, 4);
+    if (!loaded.ok) return loaded;
+    return { ok: true, record: closeInterruptedActivities(migrateV4Record(loaded.record)), migrated: true };
+  }
+
+  const versionThree = safeGetItem(storage, V3_SAVE_KEY);
+  if (!versionThree.available) return { ok: false, reason: 'storage-unavailable' };
+  const versionThreeRaw = versionThree.value;
+  if (versionThreeRaw !== null) {
+    const loaded = loadAndValidate(versionThreeRaw, 3);
+    if (!loaded.ok) return loaded;
+    return { ok: true, record: closeInterruptedActivities(migrateV3Record(loaded.record)), migrated: true };
+  }
+
+  const versionTwo = safeGetItem(storage, V2_SAVE_KEY);
+  if (!versionTwo.available) return { ok: false, reason: 'storage-unavailable' };
+  const versionTwoRaw = versionTwo.value;
   if (versionTwoRaw !== null) {
     const loaded = loadAndValidate(versionTwoRaw, 2);
     if (!loaded.ok) return loaded;
     return { ok: true, record: closeInterruptedActivities(migrateV2Record(loaded.record)), migrated: true };
   }
 
-  const legacyRaw = storage.getItem(LEGACY_SAVE_KEY);
+  const legacy = safeGetItem(storage, LEGACY_SAVE_KEY);
+  if (!legacy.available) return { ok: false, reason: 'storage-unavailable' };
+  const legacyRaw = legacy.value;
   if (legacyRaw === null) return { ok: false, reason: 'absent' };
   const loaded = loadAndValidate(legacyRaw, 1);
   if (!loaded.ok) return loaded;
@@ -199,15 +358,22 @@ export function loadSave(storage) {
 }
 
 export function writeSave(storage, state, position, mapId = state.world?.mapId ?? 'training') {
-  const record = { version: 3, state, position, mapId };
+  const record = { version: 5, state, position, mapId };
   if (!validateSaveRecord(record)) throw new TypeError('Invalid save record');
-  storage.setItem(SAVE_KEY, JSON.stringify(record));
-  return record;
+  try {
+    storage.setItem(SAVE_KEY, JSON.stringify(record));
+  } catch {
+    return { ok: false, reason: 'write-failed' };
+  }
+  return { ok: true, record };
 }
 
 export function clearSave(storage) {
-  storage.removeItem(SAVE_KEY);
-  storage.removeItem(V2_SAVE_KEY);
-  storage.removeItem(LEGACY_SAVE_KEY);
+  for (const key of [SAVE_KEY, V4_SAVE_KEY, V3_SAVE_KEY, V2_SAVE_KEY, LEGACY_SAVE_KEY]) {
+    try {
+      storage.removeItem(key);
+    } catch {
+      // Storage may reject removal in a blocked context; clearing is best effort.
+    }
+  }
 }
-

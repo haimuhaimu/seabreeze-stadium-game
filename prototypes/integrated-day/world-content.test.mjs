@@ -1,7 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MAPS, canStandOnMap } from './world-content.js';
+import { MAPS, canStandOnMap, getNamingActionObjects, getSeasonWorldObjects } from './world-content.js';
 import { getNpcSchedule } from './npc-schedules.js';
+import {
+  beginSeason,
+  createSeasonState,
+  recordSeasonAction,
+  recordSeasonProjectVisit,
+  resolveSeasonEvent,
+  upgradeSeasonProject
+} from './season-state.js';
+import { getSeasonEvent } from './season-events.js';
 
 test('training and stadium maps have reciprocal exits and safe spawn points', () => {
   assert.equal(MAPS.training.exits[0].targetMap, 'stadium');
@@ -53,4 +62,139 @@ test('spring 17 can expose all three promise locations on existing maps', () => 
 test('each core character takes initiative in the episode', () => {
   const ids = new Set([3, 4, 5, 6, 7, 8, 9].flatMap(day => getNpcSchedule(day).map(npc => npc.id)));
   for (const id of ['coach-guo', 'lin-chuan', 'aunt-xu', 'xiaoman', 'shen-qiao']) assert.ok(ids.has(id));
+});
+
+test('second-week free time exposes human-scale actions on walkable stadium paths', () => {
+  const namingRights = {
+    freeTime: { available: true, activeAction: null, records: [] }
+  };
+  const objects = getNamingActionObjects('stadium', 12, namingRights);
+  assert.deepEqual(objects.map(item => item.actionId).sort(), [
+    'free:community',
+    'free:repair',
+    'free:rest',
+    'free:shop',
+    'free:training'
+  ]);
+  for (const object of objects) {
+    assert.equal(canStandOnMap('stadium', object.approach.x, object.approach.y), true);
+  }
+});
+
+test('the archive appears only after the scratched plaque is discovered', () => {
+  const namingRights = {
+    freeTime: { available: true, activeAction: null, records: [] }
+  };
+  assert.equal(getNamingActionObjects('stadium', 12, namingRights).some(item => item.actionId === 'free:archive'), false);
+  assert.equal(getNamingActionObjects('stadium', 13, namingRights).some(item => item.actionId === 'free:archive'), true);
+  assert.equal(getNamingActionObjects('stadium', 15, namingRights).some(item => item.actionId === 'free:archive'), true);
+});
+
+test('spent or inactive free time removes action targets', () => {
+  const spent = {
+    freeTime: { available: false, activeAction: null, records: [{ dayIndex: 11, actionId: 'rest' }] }
+  };
+  assert.deepEqual(getNamingActionObjects('stadium', 11, spent), []);
+  assert.deepEqual(getNamingActionObjects('training', 11, spent), []);
+});
+
+test('the second week lets every central character take a position on the name', () => {
+  const ids = new Set([10, 11, 12, 13, 14, 15, 16].flatMap(day => getNpcSchedule(day).map(npc => npc.id)));
+  for (const id of ['coach-guo', 'lin-chuan', 'aunt-xu', 'xiaoman', 'shen-qiao', 'director-luo']) assert.ok(ids.has(id));
+  const plaqueDay = getNpcSchedule(13);
+  assert.match(plaqueDay.find(npc => npc.id === 'coach-guo').copy, /没拦|刮掉|对不起/);
+  assert.match(plaqueDay.find(npc => npc.id === 'shen-qiao').copy, /创办|名字|欠/);
+});
+
+test('the league places seven weekly actions and five construction sites in the physical world', () => {
+  const season = beginSeason(createSeasonState());
+  const objects = ['training', 'stadium'].flatMap(mapId => getSeasonWorldObjects(mapId, season));
+  assert.equal(objects.filter(item => item.kind === 'season-action').length, 7);
+  assert.equal(objects.filter(item => item.kind === 'season-project').length, 5);
+  assert.equal(objects.filter(item => item.kind === 'season-event').length, 1);
+  for (const object of objects) {
+    assert.equal(canStandOnMap(object.mapId, object.approach.x, object.approach.y), true, object.id);
+    const map = MAPS[object.mapId];
+    const interactionDistance = Math.hypot(
+      (object.x - object.approach.x) * map.width / 100,
+      (object.y - object.approach.y) * map.height / 100
+    );
+    assert.ok(interactionDistance <= 112, `${object.id} stops too far away to interact`);
+    for (const point of object.route) assert.equal(canStandOnMap(object.mapId, point.x, point.y), true, object.id);
+  }
+});
+
+test('all nine league incidents appear at a reachable physical location', () => {
+  const found = new Set();
+  for (let seasonNumber = 1; seasonNumber <= 3; seasonNumber += 1) {
+    for (let roundIndex = 0; roundIndex < 7; roundIndex += 1) {
+      const season = beginSeason(createSeasonState());
+      season.seasonNumber = seasonNumber;
+      season.roundIndex = roundIndex;
+      const expected = getSeasonEvent(roundIndex, seasonNumber);
+      const objects = ['training', 'stadium'].flatMap(mapId => getSeasonWorldObjects(mapId, season));
+      const eventObject = objects.find(item => item.kind === 'season-event');
+      assert.equal(eventObject.eventId, expected.id);
+      assert.equal(eventObject.mapId, expected.mapId);
+      assert.equal(canStandOnMap(eventObject.mapId, eventObject.approach.x, eventObject.approach.y), true);
+      found.add(eventObject.eventId);
+    }
+  }
+  assert.equal(found.size, 9);
+});
+
+test('completed league work waits for the incident before opening the match target', () => {
+  let season = beginSeason(createSeasonState());
+  season = recordSeasonAction(season, 'train-attack');
+  season = recordSeasonAction(season, 'shop-day');
+  season = upgradeSeasonProject(season, 'stands');
+  let objects = ['training', 'stadium'].flatMap(mapId => getSeasonWorldObjects(mapId, season));
+  assert.equal(objects.some(item => item.actionId === 'train-attack'), false);
+  assert.equal(objects.some(item => item.actionId === 'shop-day'), false);
+  const builtStand = objects.find(item => item.projectId === 'stands');
+  assert.equal(builtStand.level, 1);
+  assert.equal(builtStand.visited, false);
+  assert.equal(objects.some(item => item.kind === 'season-match'), false);
+  assert.deepEqual(objects.filter(item => item.kind === 'season-event').map(item => item.mapId), ['training']);
+  season = resolveSeasonEvent(season, 'shared-pitch', 'share-half');
+  objects = ['training', 'stadium'].flatMap(mapId => getSeasonWorldObjects(mapId, season));
+  assert.equal(objects.some(item => item.kind === 'season-event'), false);
+  assert.deepEqual(objects.filter(item => item.kind === 'season-match').map(item => item.mapId), ['stadium']);
+});
+
+test('built and max-level facilities stay physically available for a free visit', () => {
+  let season = beginSeason(createSeasonState());
+  season.projects.stands = 3;
+  season.projects.market = 1;
+  let objects = getSeasonWorldObjects('stadium', season);
+  assert.equal(objects.find(item => item.projectId === 'stands').level, 3);
+  assert.equal(objects.find(item => item.projectId === 'market').level, 1);
+  season = recordSeasonProjectVisit(season, 'stands');
+  objects = getSeasonWorldObjects('stadium', season);
+  assert.equal(objects.find(item => item.projectId === 'stands').visited, true);
+});
+
+test('all six recurring NPCs are available during every league round with response choices', () => {
+  const season = beginSeason(createSeasonState());
+  for (let roundIndex = 0; roundIndex < 7; roundIndex += 1) {
+    season.roundIndex = roundIndex;
+    const schedule = getNpcSchedule(17 + roundIndex, 'morning', { season });
+    assert.deepEqual(schedule.map(npc => npc.id).sort(), [
+      'aunt-xu', 'coach-guo', 'director-luo', 'lin-chuan', 'shen-qiao', 'xiaoman'
+    ]);
+    assert.equal(schedule.every(npc => npc.seasonNpc && npc.responses.length === 3), true);
+  }
+});
+
+test('affected league NPCs bring the latest incident into their field dialogue', () => {
+  let season = beginSeason(createSeasonState());
+  season = resolveSeasonEvent(season, 'shared-pitch', 'share-half');
+  const schedule = getNpcSchedule(17, 'morning', { season });
+  const xiaoman = schedule.find(npc => npc.id === 'xiaoman');
+  const director = schedule.find(npc => npc.id === 'director-luo');
+  assert.equal(xiaoman.memory.timing, 'current');
+  assert.equal(xiaoman.memory.choiceLabel, '把半块场地画出来');
+  assert.equal(xiaoman.copy, '孩子们问下周还能不能用那道白线。我告诉他们，约好的时段不会只算一次。');
+  assert.equal(director.memory, null);
+  assert.equal(director.copy, '评审看的是连续经营，不是某一个周日的热闹。');
 });

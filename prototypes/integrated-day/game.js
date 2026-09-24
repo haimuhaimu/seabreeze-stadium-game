@@ -1,5 +1,12 @@
 import { getDayContent, getOrders, requiredInventoryForDay } from './daily-content.js';
-import { getCampaignDay, getRequiredAction, isPrologueDay, isManagementWeekDay } from './campaign-content.js';
+import {
+  getCampaignDay,
+  getRequiredAction,
+  isCampaignDay,
+  isPrologueDay,
+  isManagementWeekDay,
+  isNamingRightsWeekDay
+} from './campaign-content.js';
 import {
   GATHERABLES,
   REPAIRS,
@@ -27,14 +34,35 @@ import {
   completeEpisodeHearing,
   finishManagementDay,
   advanceCampaignDay,
-  recordNpcConversation
+  recordNpcConversation,
+  beginNamingRightsWeek,
+  completeNamingMainline,
+  startNamingFreeAction,
+  finishNamingFreeAction,
+  startSecondWeeklyMatch,
+  resolveSecondWeeklyMatchChoice,
+  beginLeagueSeason,
+  chooseEliteMatchChoice,
+  chooseElitePreparation,
+  chooseSeasonAction,
+  chooseSeasonEventDecision,
+  chooseSeasonNpcMemory,
+  chooseSeasonNpcResponse,
+  buildSeasonProject,
+  visitSeasonProject,
+  startLeagueMatch,
+  resolveLeagueMatchChoice,
+  advanceLeagueRound,
+  beginNextLeagueSeason
 } from './game-state.js';
 import { loadSave, writeSave, clearSave } from './save-game.js';
 import { TRAINING_TARGETS, createTrainingSession, takeShot } from './training-game.js';
-import { getMap, getMapObjects, canStandOnMap } from './world-content.js';
+import { getMap, getMapObjects, getNamingActionObjects, getSeasonWorldObjects, canStandOnMap } from './world-content.js';
 import { getNpcSchedule } from './npc-schedules.js';
 import { getOpponent } from './opponent-content.js';
 import { getAvailableHighlights } from './match-engine.js';
+import { getAvailableVoteRoutes, getNamingMatchMoment } from './naming-rights-state.js';
+import { getFreeActionTotals } from './free-time-state.js';
 import { PROMISES, getEpisodeDay, getStoryScene } from './episode-content.js';
 import {
   ARCHIVE_CLUES,
@@ -43,6 +71,28 @@ import {
   serveFundraiser,
   takePass
 } from './episode-activities.js';
+import {
+  FREE_ACTIONS,
+  VOTE_ROUTES,
+  REVEAL_RESPONSES,
+  getFreeAction,
+  getNamingDay,
+  getNamingScene
+} from './naming-rights-content.js';
+import { getSeasonEliteMoment, getSeasonMatchMoment, getSeasonGoalStatus, getStandings, getMatchOutlook, getConstructionUnlocks } from './season-state.js';
+import {
+  CONSTRUCTION_MILESTONES,
+  SEASON_ACTIONS,
+  SEASON_GOALS,
+  SEASON_PROJECTS,
+  getLeagueTeam,
+  getSeasonNpc,
+  getSeasonProject,
+  getSeasonRound
+} from './season-content.js';
+import { SEASON_EVENTS, getSeasonEvent, getSeasonEventChoice } from './season-events.js';
+import { ELITE_OPPONENT, ELITE_PREPARATIONS, ELITE_RESULTS } from './elite-content.js';
+import { getConstructionScene, getConstructionVisuals } from './construction-content.js';
 
 const root = document.querySelector('.game');
 const viewport = document.querySelector('[data-scene]');
@@ -68,12 +118,20 @@ const storyScene = document.querySelector('[data-story-scene]');
 const episodeActivity = document.querySelector('[data-episode-activity]');
 const hearingPanel = document.querySelector('[data-hearing]');
 const weekSummary = document.querySelector('[data-week-summary]');
+const seasonConversation = document.querySelector('[data-season-conversation]');
+const seasonEventPanel = document.querySelector('[data-season-event]');
+const seasonBoard = document.querySelector('[data-season-board]');
+const seasonSummary = document.querySelector('[data-season-summary]');
+const elitePanel = document.querySelector('[data-elite-panel]');
+const seasonDocket = document.querySelector('[data-season-docket]');
+const stadiumSign = document.querySelector('[data-stadium-sign]');
+const constructionVisuals = document.querySelector('[data-construction-visuals]');
 const summaryDim = document.querySelector('[data-summary-dim]');
 const resourceIcon = document.querySelector('.money-slot .item-sprite');
 const touchControls = document.querySelector('.touch-controls');
 const touchAction = document.querySelector('[data-action]');
 
-const WALK_SPEED = 230;
+const WALK_SPEED = new URLSearchParams(window.location.search).has('smoke') ? 900 : 230;
 const ARRIVAL_DISTANCE = 8;
 const INTERACTION_DISTANCE = 112;
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -116,11 +174,35 @@ let storyReadOnly = false;
 let promiseDraft = [];
 let activeEpisodeActivity = null;
 let activePromiseId = null;
+let activeFreeActivity = null;
 let ledgerOpen = false;
 let weekSummaryDismissed = false;
+let activeSeasonNpcId = null;
+let activeSeasonEventId = null;
+let seasonBoardOpen = false;
+let elitePanelOpen = false;
+let recentProjectBuildId = null;
+let constructionRevealTimer = 0;
 const pressedKeys = new Set();
 
+function isLeagueSeason() {
+  return Boolean(state.season?.active && state.dayIndex >= 17);
+}
+
+function isManagementMode() {
+  return isCampaignDay(state.dayIndex) || isLeagueSeason();
+}
+
 function currentDay() {
+  if (isLeagueSeason()) {
+    const round = getSeasonRound(state.season.roundIndex);
+    return {
+      season: `联赛 ${state.season.seasonNumber}`,
+      date: `第 ${round.round} 轮`,
+      weekday: '比赛周',
+      weather: round.playerHome ? '海风主场' : '客场来信'
+    };
+  }
   return isPrologueDay(state.dayIndex) ? getDayContent(state.dayIndex) : getCampaignDay(state.dayIndex);
 }
 
@@ -133,7 +215,14 @@ const MAINLINE_OBJECTS = Object.freeze({
   'episode-promises': 'coach',
   'episode-funding': 'pitch-prep',
   'episode-offer': 'stadium-office',
-  'episode-match': 'match-center'
+  'episode-match': 'match-center',
+  'naming-proposal': 'guest-gate',
+  'naming-chairs': 'stadium-office',
+  'naming-alternative': 'pitch-prep',
+  'naming-plaque': 'stadium-office',
+  'naming-vote': 'match-center',
+  'naming-response': 'stadium-office',
+  'naming-match': 'match-center'
 });
 
 const ACTION_COPY = Object.freeze({
@@ -142,11 +231,55 @@ const ACTION_COPY = Object.freeze({
   'episode-promise': { title: '只来得及两件事', goal: '在两个答应过的请求中，亲自完成今天这一件。' },
   'episode-funding': { title: '灯亮以前', goal: '到主赛场边决定灯光和小满下一周的工作。' },
   'episode-offer': { title: '沈峤的旧球员证', goal: '去主赛场办公室听完沈峤给出的真工作。' },
-  'episode-match': { title: '比赛与五把椅子', goal: '走到中圈。比赛以后，让小满先说自己的选择。' }
+  'episode-match': { title: '比赛与五把椅子', goal: '走到中圈。比赛以后，让小满先说自己的选择。' },
+  'naming-proposal': { title: '蓝布盖住了旧名字', goal: '去入口看看盖在旧招牌上的蓝色冠名布。' },
+  'naming-chairs': { title: '五把椅子，五种条件', goal: '到办公室听完五个席位各自的底线。' },
+  'naming-alternative': { title: '救命钱不是唯一的钱', goal: '去场边看看，今天还能亲手做成哪一件事。' },
+  'naming-plaque': { title: '被刮掉的名字', goal: '旧仓库找到了一块创办人铭牌。去听郭教练说完。' },
+  'naming-vote': { title: '第一次真正表决', goal: '五张纸票已经放在中圈。把你们的办法带过去。' },
+  'naming-response': { title: '沈峤的半张合照', goal: '沈峤带着记者和半张合照来了。去办公室外回应他。' },
+  'naming-match': { title: '招牌下的比赛', goal: '港口工人队已经入场。走到被蓝布盖住的招牌下。' }
 });
 
 const STORY_PROP_MAP = Object.freeze({ 'player-card': 'card' });
 const STORY_PORTRAIT_MAP = Object.freeze({ 'aunt-xu': 'xu' });
+
+const NAMING_PROP_CAPTIONS = Object.freeze({
+  'covered-sign': '蓝布下面，只露出旧名字最后一个字',
+  ballots: '五张纸票，没有一张可以替别人填写',
+  'rescue-box': '许姨从小店里找出的旧铁盒',
+  plaque: '沈峤那一行被人用力刮掉了',
+  contract: '钱和决定权写在同一份协议里',
+  'half-photo': '创办合照被整齐地裁掉了一半'
+});
+
+const FREE_ACTIVITY_SCENES = Object.freeze({
+  shop: Object.freeze([
+    Object.freeze({ title: '跑完步的孩子在等水', copy: '先照顾最需要的人。', options: Object.freeze([['先递温水', 1], ['先问他要不要买套餐', .55], ['让他自己找杯子', .7]]) }),
+    Object.freeze({ title: '看台上的两位老人要一份热食', copy: '他们走得慢，东西要送过去。', options: Object.freeze([['亲自送到座位', 1], ['放在柜台等他们来拿', .65], ['请后面的客人顺手带去', .8]]) }),
+    Object.freeze({ title: '找零以后，铁盒就在手边', copy: '今天的小店收入要留下什么？', options: Object.freeze([['把零钱放进自救箱', 1], ['只放整钞', .75], ['先记账，稍后再放', .6]]) })
+  ]),
+  training: Object.freeze([
+    Object.freeze({ title: '有人跑出了空位', copy: '这次不需要复杂口令。', options: Object.freeze([['把球传给空位的人', 1], ['自己继续带球', .55], ['等教练喊名字', .7]]) }),
+    Object.freeze({ title: '许小满刚刚传丢一球', copy: '他低着头往回走。', options: Object.freeze([['马上把下一球传回去', 1], ['先换另一个人', .55], ['让全队停下来等他', .75]]) }),
+    Object.freeze({ title: '最后一脚留给谁', copy: '替补队员一直站在边线。', options: Object.freeze([['让替补完成最后一脚', 1], ['让主力稳稳结束', .7], ['由安若童自己踢', .6]]) })
+  ]),
+  repair: Object.freeze([
+    Object.freeze({ title: '灯架底座在晃', copy: '风每次吹来，螺帽都会松一点。', options: Object.freeze([['先停电，再拧紧底座', 1], ['直接扶住灯架', .55], ['在旁边立一块提醒牌', .7]]) }),
+    Object.freeze({ title: '看台有一块木板开裂', copy: '周日会有人坐到这里。', options: Object.freeze([['换掉整块木板', 1], ['用胶带贴住裂口', .55], ['把这个座位暂时封住', .8]]) }),
+    Object.freeze({ title: '招牌绳结正在磨损', copy: '蓝布比旧招牌更吃风。', options: Object.freeze([['换绳并打双结', 1], ['再拉紧一点', .65], ['等周日早上处理', .5]]) })
+  ]),
+  community: Object.freeze([
+    Object.freeze({ title: '孩子们想用半块场地', copy: '球队训练还有二十分钟。', options: Object.freeze([['划出一块共享区域', 1], ['让孩子等训练结束', .65], ['今天先请他们回去', .5]]) }),
+    Object.freeze({ title: '入口摊主要借一个插座', copy: '她愿意把今天一部分收入放进自救箱。', options: Object.freeze([['检查线路后接给她', 1], ['让她自己找插座', .6], ['为了安全直接拒绝', .75]]) }),
+    Object.freeze({ title: '有人问为什么要签名', copy: '不是每个人都熟悉球场的账。', options: Object.freeze([['把冠名条件读给大家听', 1], ['只说球场快没钱了', .65], ['让大家先签再解释', .5]]) })
+  ]),
+  archive: Object.freeze([
+    Object.freeze({ title: '旧照片没有写年份', copy: '墙角还有一叠比赛海报。', options: Object.freeze([['按球衣和海报对照', 1], ['凭照片颜色猜年份', .6], ['只保留最清楚的一张', .55]]) }),
+    Object.freeze({ title: '第一份章程有两种墨水', copy: '其中一处签名后来被覆盖。', options: Object.freeze([['对着光检查原签名', 1], ['只抄下现在能见的字', .6], ['请郭教练凭记忆补写', .7]]) }),
+    Object.freeze({ title: '半张合照的另一半在旧信封里', copy: '撕口和沈峤手里那张完全吻合。', options: Object.freeze([['并排拍照，保留原件', 1], ['用胶水直接粘回去', .7], ['把两半分开收好', .65]]) })
+  ])
+});
 
 function isEpisodeDayResolved() {
   if (!isManagementWeekDay(state.dayIndex)) return false;
@@ -161,6 +294,15 @@ function isEpisodeDayResolved() {
   return false;
 }
 
+function isNamingDayResolved() {
+  if (!isNamingRightsWeekDay(state.dayIndex)) return false;
+  return state.namingRights.sceneHistory.includes(getNamingDay(state.dayIndex).sceneId);
+}
+
+function isCurrentCampaignDayResolved() {
+  return isNamingRightsWeekDay(state.dayIndex) ? isNamingDayResolved() : isEpisodeDayResolved();
+}
+
 function pendingPromiseIds() {
   return state.episode.promisesChosen.filter(id => !state.episode.promisesCompleted.includes(id));
 }
@@ -168,8 +310,8 @@ function pendingPromiseIds() {
 function rebuildWorldObjects() {
   const map = getMap(activeMapId);
   const objects = {};
-  const requiredAction = getRequiredAction(state.dayIndex);
-  const requiredObjectId = MAINLINE_OBJECTS[requiredAction];
+  const requiredAction = isCampaignDay(state.dayIndex) ? getRequiredAction(state.dayIndex) : null;
+  const requiredObjectId = requiredAction ? MAINLINE_OBJECTS[requiredAction] : null;
   const promiseObjectIds = new Map();
   if ([5, 6].includes(state.dayIndex)) {
     for (const promiseId of pendingPromiseIds()) {
@@ -193,7 +335,7 @@ function rebuildWorldObjects() {
         ...object,
         kind: 'mainline',
         actionId: requiredAction,
-        label: isEpisodeDayResolved()
+        label: isCurrentCampaignDayResolved()
           ? '今天的决定已经完成'
           : requiredAction === 'episode-promises'
             ? '去看小满的七号背心'
@@ -202,12 +344,29 @@ function rebuildWorldObjects() {
     }
   }
 
+  if (isNamingRightsWeekDay(state.dayIndex)) {
+    for (const object of getNamingActionObjects(activeMapId, state.dayIndex, state.namingRights)) {
+      objects[object.id] = { ...object };
+    }
+  }
+
+  if (isLeagueSeason()) {
+    for (const object of getSeasonWorldObjects(activeMapId, state.season)) {
+      objects[object.id] = { ...object };
+    }
+  }
+
   for (const exit of map.exits) {
     objects[exit.id] = { ...exit, kind: 'exit' };
   }
 
-  const schedules = isManagementWeekDay(state.dayIndex)
-    ? getNpcSchedule(state.dayIndex, state.phase, { opponentId: state.management.opponentId, episode: state.episode })
+  const schedules = isManagementMode()
+    ? getNpcSchedule(state.dayIndex, state.phase, {
+        opponentId: state.management.opponentId,
+        episode: state.episode,
+        namingRights: state.namingRights,
+        season: state.season
+      })
     : [];
   for (const npc of schedules.filter(item => item.mapId === activeMapId)) {
     const guestSide = activeMapId === 'stadium' && npc.x < 15 && npc.y < 50;
@@ -241,11 +400,17 @@ function formatTime(minutes) {
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 }
 
+let storageWriteBlocked = false;
 function persist() {
   if (!hasStarted) return;
   state.world.mapId = activeMapId;
   state.world.positions[activeMapId] = { ...position };
-  writeSave(localStorage, state, position, activeMapId);
+  const result = writeSave(localStorage, state, position, activeMapId);
+  if (!result.ok && !storageWriteBlocked) {
+    storageWriteBlocked = true;
+    const warning = document.querySelector('[data-storage-warning]');
+    if (warning) warning.hidden = false;
+  }
   lastPositionSave = performance.now();
 }
 
@@ -257,10 +422,19 @@ function isShopReady() {
   return hasIngredients(state.inventory, requiredInventoryForDay(state.dayIndex));
 }
 
+const viewMetrics = { planeWidth: 0, planeHeight: 0, viewportWidth: 0, viewportHeight: 0 };
+
+function refreshViewMetrics() {
+  viewMetrics.planeWidth = plane.clientWidth;
+  viewMetrics.planeHeight = plane.clientHeight;
+  viewMetrics.viewportWidth = viewport.clientWidth;
+  viewMetrics.viewportHeight = viewport.clientHeight;
+}
+
 function toPixels(point) {
   return {
-    x: point.x * plane.clientWidth / 100,
-    y: point.y * plane.clientHeight / 100
+    x: point.x * viewMetrics.planeWidth / 100,
+    y: point.y * viewMetrics.planeHeight / 100
   };
 }
 
@@ -275,11 +449,11 @@ function canStand(x, y) {
 }
 
 function availableObject(id) {
-  if (!hasStarted || trainingActive || activeEpisodeActivity || storySceneId || state.phase !== 'morning') return false;
+  if (!hasStarted || trainingActive || activeEpisodeActivity || activeFreeActivity || storySceneId || state.phase !== 'morning') return false;
   if (GATHERABLES[id] && state.collectedToday.includes(id)) return false;
   const object = worldObjects[id];
   if (!object) return false;
-  if (isManagementWeekDay(state.dayIndex) && object.kind === 'mainline') {
+  if (isCampaignDay(state.dayIndex) && object.kind === 'mainline') {
     if (object.actionId.startsWith('promise:')) {
       const promiseId = object.actionId.split(':')[1];
       return [5, 6].includes(state.dayIndex)
@@ -287,7 +461,7 @@ function availableObject(id) {
         && !state.episode.promisesCompleted.includes(promiseId)
         && !isEpisodeDayResolved();
     }
-    return !isEpisodeDayResolved();
+    return !isCurrentCampaignDayResolved();
   }
   return true;
 }
@@ -347,6 +521,65 @@ function inventoryShortageCopy() {
 }
 
 function phaseDetails() {
+  if (isLeagueSeason()) {
+    const round = getSeasonRound(state.season.roundIndex);
+    const opponent = getLeagueTeam(round.playerOpponentId);
+    const actions = state.season.week.actions.length;
+    const talked = state.season.week.talkedNpcIds.length;
+    const rank = getStandings(state.season).findIndex(row => row.teamId === 'haifeng') + 1;
+    const event = getSeasonEvent(state.season.roundIndex, state.season.seasonNumber);
+    const eventPending = !state.season.week.eventChoiceId;
+    const eventPlace = event.mapId === 'training' ? '旧训练场' : '海风主赛场';
+    return {
+      title: state.season.seasonComplete
+        ? `第 ${state.season.seasonNumber} 赛季结束`
+        : state.phase === 'complete'
+          ? `第 ${round.round} 轮结束`
+          : `海风联赛 · 第 ${round.round} 轮`,
+      goal: state.phase === 'complete'
+        ? state.season.seasonComplete
+          ? `最终排名第 ${rank}。建设和关系会保留到下个赛季。`
+          : '本轮积分已经更新。准备好后进入下一轮。'
+        : actions < 3
+          ? `本轮对阵${opponent.name}。安排三件事，也可以先和人谈谈。${eventPending ? `${eventPlace}还有一件事：${event.title}。` : ''}已谈 ${talked} 人。`
+          : eventPending
+            ? `三项安排已经完成。去${eventPlace}回应“${event.title}”。`
+            : '三项安排和本轮事件都已处理。去主赛场中圈进入比赛。',
+      label: '现金',
+      value: `${state.economy.cash}元`,
+      icon: 'item-coins'
+    };
+  }
+  if (isNamingRightsWeekDay(state.dayIndex)) {
+    const actionId = getRequiredAction(state.dayIndex);
+    const action = ACTION_COPY[actionId];
+    const completed = isNamingDayResolved();
+    const totals = getFreeActionTotals(state.namingRights.freeTime);
+    const activeAction = state.namingRights.freeTime.activeAction;
+    return {
+      title: state.namingRights.weekComplete
+        ? '第二周已经结算'
+        : state.phase === 'complete'
+          ? '今天的选择已经留下'
+          : action.title,
+      goal: state.namingRights.weekComplete
+        ? `蓝布已经落下。这里现在叫${state.namingRights.settlement.stadiumName}。`
+        : state.phase === 'complete'
+          ? state.dayIndex === 16 ? '招牌已经揭开，这一周的结果已经保存。' : '今天已经结束，可以去往下一天。'
+          : !completed
+            ? action.goal
+            : activeAction
+              ? `把${getFreeAction(activeAction.actionId).label}认真做完。`
+              : state.namingRights.freeTime.available
+                ? '主线已经回应。现在可以在球场上选择一件自由行动，也可以休息。'
+                : actionId === 'naming-match'
+                  ? '走进比赛，终场以后揭开招牌。'
+                  : '今天的决定已经完成。',
+      label: '自救金',
+      value: `${totals.fund}元`,
+      icon: 'item-coins'
+    };
+  }
   if (isManagementWeekDay(state.dayIndex)) {
     const actionId = getRequiredAction(state.dayIndex);
     const action = ACTION_COPY[actionId];
@@ -419,13 +652,31 @@ function renderCalendar() {
 
 function renderPhases() {
   const track = document.querySelector('.phase-track');
-  if (isManagementWeekDay(state.dayIndex)) {
-    if (track.dataset.mode !== 'week') {
-      track.dataset.mode = 'week';
+  if (isLeagueSeason()) {
+    if (track.dataset.mode !== 'season') {
+      track.dataset.mode = 'season';
+      track.classList.add('week-track', 'season-track');
+      track.innerHTML = Array.from({ length: 7 }, (_, offset) => (
+        `<li data-season-round="${offset}"><span>第 ${offset + 1} 轮</span><strong>${offset === 6 ? '收官' : '联赛'}</strong></li>`
+      )).join('');
+    }
+    track.querySelectorAll('[data-season-round]').forEach(step => {
+      const roundIndex = Number(step.dataset.seasonRound);
+      step.classList.toggle('active', roundIndex === state.season.roundIndex);
+      step.classList.toggle('done', roundIndex < state.season.roundIndex || (roundIndex === state.season.roundIndex && state.phase === 'complete'));
+    });
+    return;
+  }
+  if (isCampaignDay(state.dayIndex)) {
+    const weekStart = isNamingRightsWeekDay(state.dayIndex) ? 10 : 3;
+    const weekMode = `week-${weekStart}`;
+    if (track.dataset.mode !== weekMode) {
+      track.dataset.mode = weekMode;
       track.classList.add('week-track');
       track.innerHTML = Array.from({ length: 7 }, (_, offset) => {
-        const day = getCampaignDay(offset + 3);
-        return `<li data-week-day="${offset + 3}"><span>${day.weekday}</span><strong>${day.date}日</strong></li>`;
+        const dayIndex = offset + weekStart;
+        const day = getCampaignDay(dayIndex);
+        return `<li data-week-day="${dayIndex}"><span>${day.weekday}</span><strong>${day.date}日</strong></li>`;
       }).join('');
     }
     track.querySelectorAll('[data-week-day]').forEach(step => {
@@ -436,9 +687,9 @@ function renderPhases() {
     return;
   }
 
-  if (track.dataset.mode === 'week') {
+  if (track.dataset.mode?.startsWith('week-') || track.dataset.mode === 'season') {
     track.dataset.mode = 'day';
-    track.classList.remove('week-track');
+    track.classList.remove('week-track', 'season-track');
     track.innerHTML = [
       ['morning', '上午', '沿场走走'],
       ['shop', '下午', '开一会儿店'],
@@ -513,14 +764,82 @@ function makeWorldButton(id, object) {
     button.append(shadow, sprite, name);
   } else {
     button.classList.add(object.kind === 'exit' ? 'exit-target' : 'mainline-target');
+    if (object.kind === 'free-action') button.classList.add('free-action-target');
+    if (object.kind.startsWith('season-')) {
+      button.classList.add('season-world-target', object.kind === 'season-event' ? 'season-event-target' : object.kind);
+    }
+    if (object.kind === 'season-project') {
+      button.dataset.level = String(object.level);
+      button.dataset.visited = String(object.visited);
+      button.dataset.built = String(object.level > 0);
+      button.dataset.buildAvailable = String(object.buildAvailable);
+    }
     const ring = document.createElement('span');
     ring.className = 'target-ring';
     const marker = document.createElement('span');
     marker.className = object.kind === 'exit' ? 'exit-marker' : 'mainline-marker';
-    marker.textContent = object.kind === 'exit' ? '海风路' : '处理';
+    marker.textContent = object.kind === 'exit'
+      ? '海风路'
+      : object.kind === 'free-action'
+        ? getFreeAction(object.actionId.split(':')[1]).label
+        : object.kind === 'season-action'
+          ? SEASON_ACTIONS[object.actionId].label
+          : object.kind === 'season-project'
+            ? object.level > 0
+              ? `${getConstructionScene(object.projectId).levels[object.level - 1].label} ${object.level}/3`
+              : `${getSeasonProject(object.projectId).label} 待开工`
+            : object.kind === 'season-event'
+              ? '回应本轮事件'
+            : object.kind === 'season-match'
+              ? '进入本轮比赛'
+              : '处理';
     button.append(ring, marker);
   }
   return button;
+}
+
+function renderConstructionVisuals() {
+  const visible = isLeagueSeason();
+  constructionVisuals.hidden = !visible;
+  if (!visible) {
+    constructionVisuals.replaceChildren();
+    return;
+  }
+  const fragment = document.createDocumentFragment();
+  for (const visual of getConstructionVisuals(activeMapId, state.season.projects)) {
+    const item = document.createElement('div');
+    item.className = `construction-visual construction-${visual.projectId}${visual.complete ? ' is-complete' : ''}${recentProjectBuildId === visual.projectId ? ' is-revealing' : ''}`;
+    item.dataset.constructionProject = visual.projectId;
+    item.dataset.level = String(visual.level);
+    item.style.setProperty('--construction-x', `${visual.x}%`);
+    item.style.setProperty('--construction-y', `${visual.y}%`);
+    item.style.setProperty('--construction-width', `${visual.width}%`);
+    item.style.setProperty('--construction-height', `${visual.height}%`);
+    const plaque = document.createElement('span');
+    plaque.className = 'construction-plaque';
+    const progress = document.createElement('small');
+    progress.textContent = visual.complete ? '稳定运营' : `${visual.level} / 3`;
+    const label = document.createElement('strong');
+    label.textContent = visual.stageLabel;
+    plaque.append(progress, label);
+    item.append(plaque);
+    fragment.append(item);
+  }
+  constructionVisuals.replaceChildren(fragment);
+}
+
+function renderStadiumSign() {
+  const visible = activeMapId === 'stadium' && (isNamingRightsWeekDay(state.dayIndex) || isLeagueSeason());
+  stadiumSign.hidden = !visible;
+  if (!visible) return;
+  const routeId = state.namingRights.voteRoute;
+  const signMode = routeId === 'co-name' ? 'co-name' : routeId === 'community-save' ? 'community' : routeId === 'delay' ? 'delay' : isLeagueSeason() ? 'community' : 'covered';
+  stadiumSign.dataset.sign = signMode;
+  stadiumSign.querySelector('.stadium-name-old').textContent = '海风球场';
+  stadiumSign.querySelector('.stadium-name-cloth').textContent = routeId === 'co-name' ? '澜岸' : '澜岸体育';
+  stadiumSign.setAttribute('aria-label', routeId
+    ? `球场招牌现在是${VOTE_ROUTES[routeId].stadiumName}`
+    : '海风球场旧招牌被蓝色冠名布盖住');
 }
 
 function renderDynamicWorldContent() {
@@ -563,6 +882,8 @@ function renderWorldTargets() {
     ? worldObjects.shop?.actionId === 'promise:fundraise' ? '和许姨开店筹钱' : '场边小店'
     : shopReady ? '可以开店' : '场边小店';
 
+  renderStadiumSign();
+  renderConstructionVisuals();
   renderDynamicWorldContent();
   updateProximity(true);
 }
@@ -622,6 +943,13 @@ function choiceLabel(actionId, choiceId) {
   }
   if (actionId === 'episode-offer') return '让小满自己回答';
   if (actionId === 'episode-match') return '完成比赛与听证';
+  if (actionId === 'naming-proposal') return '周五公开表决';
+  if (actionId === 'naming-chairs') return '写下五种条件';
+  if (actionId === 'naming-alternative') return '打开每天的自由时间';
+  if (actionId === 'naming-plaque') return '公开承认创办历史';
+  if (actionId === 'naming-vote') return VOTE_ROUTES[choiceId]?.label ?? choiceId;
+  if (actionId === 'naming-response') return REVEAL_RESPONSES[choiceId]?.label ?? choiceId;
+  if (actionId === 'naming-match') return '完成比赛并揭开招牌';
   return choiceId;
 }
 
@@ -636,6 +964,71 @@ function getDecisionConfig(actionId) {
         { id: 'community', label: '请求社区短期援助', detail: '现金回到 0 / 社区支持 -6' },
         { id: 'shen', label: '接受沈峤过桥资金', detail: '现金回到 0 / 沈峤影响 +1' }
       ]
+    };
+  }
+  if (actionId.startsWith('season-action:')) {
+    const seasonActionId = actionId.slice('season-action:'.length);
+    const action = SEASON_ACTIONS[seasonActionId];
+    if (!action) return null;
+    const effects = [];
+    if (action.effects.attack) effects.push(`进攻 +${action.effects.attack}`);
+    if (action.effects.defense) effects.push(`防守 +${action.effects.defense}`);
+    if (action.effects.cohesion) effects.push(`凝聚 +${action.effects.cohesion}`);
+    if (action.effects.cash) effects.push(`现金 +${action.effects.cash}`);
+    if (action.effects.community) effects.push(`社区 +${action.effects.community}`);
+    if (action.effects.facility) effects.push(`球场 +${action.effects.facility}`);
+    if (seasonActionId === 'rest') effects.push('体力恢复');
+    return {
+      kicker: `本轮行动 ${state.season.week.actions.length + 1} / 3`,
+      title: action.label,
+      copy: `${action.place}。这会占用本轮三个行动位中的一个。`,
+      options: [{ id: seasonActionId, label: '就把今天留给这件事', detail: effects.join(' / ') || '让这一周稳稳向前' }]
+    };
+  }
+  if (actionId.startsWith('season-project:')) {
+    const projectId = actionId.slice('season-project:'.length);
+    const project = SEASON_PROJECTS[projectId];
+    if (!project) return null;
+    const currentLevel = state.season.projects[projectId];
+    const scene = getConstructionScene(projectId);
+    const currentStage = currentLevel ? scene.levels[currentLevel - 1] : null;
+    const upgrade = project.levels[currentLevel] ?? null;
+    const affordable = upgrade ? state.economy.cash >= upgrade.cost : false;
+    const alreadyBuilt = state.season.week.actions.includes(`build:${projectId}`);
+    const actionsFull = state.season.week.actions.length >= 3;
+    const visited = state.season.week.visitedProjectIds.includes(projectId);
+    const options = [];
+    if (currentLevel > 0) {
+      options.push({
+        id: `visit:${projectId}`,
+        label: visited ? `本轮已经和${getSeasonNpc(scene.patronId).name}来过` : `和${getSeasonNpc(scene.patronId).name}一起用一会儿`,
+        detail: visited ? '下一轮还可以再来' : '12 分钟 / 不占经营行动 / 关系 +1',
+        disabled: visited
+      });
+    }
+    if (upgrade) {
+      const blocked = !affordable || alreadyBuilt || actionsFull;
+      const blockedLabel = !affordable
+        ? `还缺 ${upgrade.cost - state.economy.cash} 元`
+        : alreadyBuilt
+          ? '这轮已经完成一次建设'
+          : actionsFull
+            ? '本轮三个行动已经排满'
+            : null;
+      options.push({
+        id: projectId,
+        label: blockedLabel ?? `投入 ${upgrade.cost} 元继续建设`,
+        detail: blocked ? '不会消耗现金或行动位' : `完成${upgrade.label}，达到 ${currentLevel + 1} / 3 级`,
+        disabled: blocked
+      });
+    }
+    return {
+      kicker: `${project.label} ${currentLevel} / 3`,
+      title: currentStage?.label ?? upgrade.label,
+      copy: currentStage
+        ? `${currentStage.copy}账上现有 ${state.economy.cash} 元。`
+        : `这里仍被施工布盖着。建设会永久保留，账上现有 ${state.economy.cash} 元。`,
+      options
     };
   }
   return null;
@@ -653,7 +1046,7 @@ function renderDecisionPanel() {
   ledger.replaceChildren();
   document.querySelector('[data-decision-close]').hidden = decisionAction === 'resolve-shortfall';
   document.querySelector('[data-decision-options]').innerHTML = config.options.map(option => (
-    `<button type="button" data-decision-choice="${option.id}"><strong>${option.label}</strong><small>${option.detail}</small></button>`
+    `<button type="button" data-decision-choice="${option.id}"${option.disabled ? ' disabled' : ''}><strong>${option.label}</strong><small>${option.detail}</small></button>`
   )).join('');
 }
 
@@ -676,7 +1069,8 @@ function storyOption(id, label, detail = '', disabled = false) {
 function renderStoryScene() {
   storyScene.hidden = !storySceneId;
   if (!storySceneId) return;
-  const scene = getStoryScene(storySceneId);
+  const namingScene = isNamingRightsWeekDay(state.dayIndex);
+  const scene = namingScene ? getNamingScene(storySceneId) : getStoryScene(storySceneId);
   const day = currentDay();
   const portrait = document.querySelector('[data-story-portrait]');
   const prop = document.querySelector('[data-story-prop]');
@@ -691,7 +1085,7 @@ function renderStoryScene() {
     card: '沈峤二十年前的旧球员证',
     chairs: '中圈里正好放着五把椅子'
   };
-  document.querySelector('[data-story-prop-caption]').textContent = captions[prop.dataset.prop];
+  document.querySelector('[data-story-prop-caption]').textContent = NAMING_PROP_CAPTIONS[prop.dataset.prop] ?? captions[prop.dataset.prop];
 
   const picker = document.querySelector('[data-promise-picker]');
   const choosingPromises = storySceneId === 'seven-bib' && !storyReadOnly && !state.episode.promisesChosen.length;
@@ -730,6 +1124,25 @@ function renderStoryScene() {
   if (!storyReadOnly && storySceneId === 'sunday-match') {
     options = storyOption('start-match', '走进主场', '海岬大学联队已经在另一侧热身');
   }
+  if (namingScene && !storyReadOnly && scene.choices.length) {
+    options = scene.choices.map(choice => storyOption(choice.id, choice.label, choice.detail)).join('');
+  }
+  if (namingScene && !storyReadOnly && storySceneId === 'first-vote') {
+    options = getAvailableVoteRoutes(state.namingRights).map(route => {
+      const missing = route.disabled
+        ? `还缺 ${route.missingFund} 元自救金和 ${route.missingSignatures} 个签名`
+        : route.detail;
+      return storyOption(`naming-vote:${route.id}`, route.label, missing, route.disabled);
+    }).join('');
+  }
+  if (namingScene && !storyReadOnly && storySceneId === 'half-photo') {
+    const evidence = getFreeActionTotals(state.namingRights.freeTime).evidence > 0;
+    options = Object.values(REVEAL_RESPONSES).map(response => storyOption(
+      `naming-response:${response.id}`,
+      response.label,
+      response.id === 'restore-history' && evidence ? '旧照片和章程已经能公开证明他的创办人身份' : response.detail
+    )).join('');
+  }
   document.querySelector('[data-story-options]').innerHTML = options;
 }
 
@@ -762,10 +1175,79 @@ function finishEpisodePromiseActivity(fundraisingMode = null) {
   return changed;
 }
 
+function startNamingFreeActivity(actionId) {
+  const previous = state;
+  state = startNamingFreeAction(state, actionId);
+  const started = !previous.namingRights.freeTime.activeAction && Boolean(state.namingRights.freeTime.activeAction);
+  if (!started) {
+    showToast(state.journal.at(-1)?.text);
+    render();
+    return false;
+  }
+  persist();
+  if (actionId === 'rest') {
+    state = finishNamingFreeAction(state, { score: 1 });
+    showToast(state.journal.at(-1)?.text);
+    persist();
+    render();
+    return true;
+  }
+  activeFreeActivity = { actionId, step: 0, scoreTotal: 0, lastChoice: '' };
+  destination = null;
+  pendingInteraction = null;
+  movementRoute = [];
+  render();
+  return true;
+}
+
+function takeNamingFreeChoice(quality, label) {
+  if (!activeFreeActivity || activeFreeActivity.step >= 3) return false;
+  activeFreeActivity = {
+    ...activeFreeActivity,
+    step: activeFreeActivity.step + 1,
+    scoreTotal: activeFreeActivity.scoreTotal + Number(quality),
+    lastChoice: label
+  };
+  renderEpisodeActivity();
+  return true;
+}
+
+function finishNamingFreeActivity() {
+  if (!activeFreeActivity || activeFreeActivity.step < 3) return false;
+  const score = activeFreeActivity.scoreTotal / 3;
+  const previous = state;
+  state = finishNamingFreeAction(state, { score });
+  const changed = state !== previous;
+  if (changed) {
+    showToast(state.journal.at(-1)?.text);
+    persist();
+  }
+  activeFreeActivity = null;
+  render();
+  return changed;
+}
+
 function renderEpisodeActivity() {
-  episodeActivity.hidden = !activeEpisodeActivity;
-  if (!activeEpisodeActivity) return;
+  episodeActivity.hidden = !activeEpisodeActivity && !activeFreeActivity;
+  if (!activeEpisodeActivity && !activeFreeActivity) return;
+  if (activeFreeActivity) {
+    const action = FREE_ACTIONS[activeFreeActivity.actionId];
+    const scenes = FREE_ACTIVITY_SCENES[activeFreeActivity.actionId];
+    document.querySelector('[data-activity-kicker]').textContent = '今天只认真做这一件事';
+    document.querySelector('[data-activity-title]').textContent = action.label;
+    const stage = document.querySelector('[data-activity-stage]');
+    document.querySelector('[data-activity-progress]').textContent = `${activeFreeActivity.step} / 3`;
+    if (activeFreeActivity.step >= 3) {
+      stage.innerHTML = `<h3>这件事今天做完了</h3><p>${action.resultCopy}</p><button type="button" data-free-finish>把结果放进周五的票箱</button>`;
+    } else {
+      const scene = scenes[activeFreeActivity.step];
+      const feedback = activeFreeActivity.lastChoice ? `<small>刚才你选择了：${activeFreeActivity.lastChoice}</small>` : '';
+      stage.innerHTML = `<h3>${scene.title}</h3><p>${scene.copy}</p>${feedback}<div class="activity-choices">${scene.options.map(([label, quality]) => `<button type="button" data-free-quality="${quality}">${label}</button>`).join('')}</div>`;
+    }
+    return;
+  }
   const promise = PROMISES[activePromiseId];
+  document.querySelector('[data-activity-kicker]').textContent = '今天只做一件事';
   document.querySelector('[data-activity-title]').textContent = promise.activityTitle;
   const stage = document.querySelector('[data-activity-stage]');
   let progress = '';
@@ -822,32 +1304,71 @@ function renderHearing() {
 }
 
 function renderMatchPanel() {
-  const match = state.management?.match;
-  const active = decisionAction === 'play-match' && match && !state.management.matchResult;
+  const namingMatch = decisionAction === 'play-naming-match';
+  const seasonMatch = decisionAction === 'play-season-match';
+  const match = seasonMatch ? state.season?.match : namingMatch ? state.namingRights?.match : state.management?.match;
+  const active = seasonMatch
+    ? Boolean(match && !state.season.week.roundComplete)
+    : namingMatch
+    ? Boolean(match && !state.namingRights.weekComplete)
+    : decisionAction === 'play-match' && match && !state.management.matchResult;
   matchPanel.hidden = !active;
   if (!active) return;
-  const opponent = getOpponent(state.management.opponentId);
+  const opponent = seasonMatch
+    ? getLeagueTeam(match.opponentId)
+    : getOpponent(namingMatch ? 'harbor-workers' : state.management.opponentId);
+  document.querySelector('[data-match-home]').textContent = seasonMatch
+    ? '海风队'
+    : namingMatch && state.namingRights.voteRoute
+      ? VOTE_ROUTES[state.namingRights.voteRoute].stadiumName
+      : '海风球场';
   document.querySelector('[data-match-score]').textContent = `${match.homeGoals} : ${match.awayGoals}`;
   document.querySelector('[data-match-opponent]').textContent = opponent.name;
-  const highlight = getAvailableHighlights(match, state.episode);
+  const highlight = seasonMatch
+    ? getSeasonMatchMoment(state.season)
+    : namingMatch
+      ? getNamingMatchMoment(state.namingRights)
+      : getAvailableHighlights(match, state.episode);
   document.querySelector('[data-match-minute]').textContent = `第 ${highlight.minute} 分钟`;
   document.querySelector('[data-match-title]').textContent = highlight.title;
   document.querySelector('[data-match-copy]').textContent = highlight.copy;
-  document.querySelector('[data-match-options]').innerHTML = highlight.choices.map(choice => (
-    `<button type="button" data-highlight-choice="${choice.id}"><strong>${choice.label}</strong><small>${choice.detail}</small></button>`
-  )).join('');
+  document.querySelector('[data-match-options]').innerHTML = highlight.choices.map(choice => {
+    const detail = seasonMatch
+      ? choice.callbackReady ? '本轮做过的事会回应这个选择。' : '这件准备还不充分，但比赛仍会继续。'
+      : namingMatch && choice.callbackReady ? `本周做过的事会回应这个选择。${choice.detail}` : choice.detail;
+    return `<button type="button" data-highlight-choice="${choice.id}"><strong>${choice.label}</strong><small>${detail}</small></button>`;
+  }).join('');
 }
 
 function renderManagementMetrics() {
-  const active = isManagementWeekDay(state.dayIndex);
+  const active = isManagementMode();
   const metrics = document.querySelector('[data-management-metrics]');
   const care = document.querySelector('[data-weekly-care]');
-  metrics.hidden = !active || !ledgerOpen;
-  care.hidden = !active;
+  metrics.hidden = !active || !ledgerOpen || isLeagueSeason();
+  care.hidden = !active || isLeagueSeason();
   if (!active) return;
-  const careCopy = state.management.weekComplete
-    ? ['这一周留下的决定', state.management.settlement.character.nextCrisis]
-    : state.dayIndex === 3
+  if (isLeagueSeason()) return;
+  const namingWeek = isNamingRightsWeekDay(state.dayIndex);
+  const totals = namingWeek ? getFreeActionTotals(state.namingRights.freeTime) : null;
+  const careCopy = namingWeek
+    ? state.namingRights.weekComplete
+      ? [state.namingRights.settlement.stadiumName, state.namingRights.settlement.nextCrisis]
+      : state.dayIndex === 10
+        ? ['蓝布盖住了旧名字', '周五以前，谁都不能私下签字']
+        : state.dayIndex === 11
+          ? ['五把椅子的条件', state.namingRights.freeTime.available ? '今天还能亲手做一件事' : '先听完五种底线']
+          : state.dayIndex === 12
+            ? ['海风自救箱', `已有 ${totals.fund} 元，${totals.signatures} 个签名`]
+            : state.dayIndex === 13
+              ? ['被刮掉的名字', totals.evidence ? '完整证据已经整理好' : '承认过去，也要决定现在']
+              : state.dayIndex === 14
+                ? ['五张纸票', state.namingRights.voteRoute ? VOTE_ROUTES[state.namingRights.voteRoute].label : `自救金 ${totals.fund} 元，签名 ${totals.signatures} 个`]
+                : state.dayIndex === 15
+                  ? ['沈峤的半张合照', state.namingRights.response ? REVEAL_RESPONSES[state.namingRights.response].label : '他在等一个明确回答']
+                  : ['招牌下的比赛', state.namingRights.match ? '终场以后揭开招牌' : '港口工人队已经入场']
+    : state.management.weekComplete
+      ? ['这一周留下的决定', state.management.settlement.character.nextCrisis]
+      : state.dayIndex === 3
     ? ['空白通知还没有名字', '先听完每个人']
     : state.dayIndex === 4
       ? ['小满的七号背心', state.episode.promisesChosen.length ? '两项承诺已经写下' : '只能先答应两件事']
@@ -868,8 +1389,308 @@ function renderManagementMetrics() {
   document.querySelector('[data-metric="governance"]').textContent = `${state.governance.support}/5`;
 }
 
+function seasonRank() {
+  return getStandings(state.season).findIndex(row => row.teamId === 'haifeng') + 1;
+}
+
+function renderMatchOutlook() {
+  const outlookLine = document.querySelector('[data-match-outlook]');
+  if (!outlookLine) return;
+  const round = getSeasonRound(state.season.roundIndex);
+  const opponent = getLeagueTeam(round.playerOpponentId);
+  const difficulty = opponent.strength + Math.max(0, state.season.seasonNumber - 1) * 2;
+  const outlook = getMatchOutlook({
+    attack: state.roster.attack,
+    defense: state.roster.defense,
+    cohesion: state.roster.cohesion,
+    facility: state.facilities.condition,
+    cash: state.economy.cash
+  }, state.season.projects, difficulty);
+
+  const levels = Object.values(state.season.projects).reduce((sum, value) => sum + value, 0);
+  const edge = -outlook.gap;
+  const unlocks = getConstructionUnlocks(state.season.projects);
+  const nextMilestone = [
+    CONSTRUCTION_MILESTONES.extraMoment,
+    CONSTRUCTION_MILESTONES.forgiveOpening,
+    CONSTRUCTION_MILESTONES.fullBuild
+  ].find(target => levels < target) ?? null;
+
+  document.querySelector('[data-outlook-construction]').textContent = nextMilestone === null
+    ? `建设 ${levels} 级 · 已建成`
+    : `建设 ${levels} 级 · 距 ${nextMilestone} 级还差 ${nextMilestone - levels}`;
+  document.querySelector('[data-outlook-deficit]').textContent = outlook.concededGoals === 0
+    ? '开场不落后'
+    : `开场落后 ${outlook.concededGoals} 球`;
+  document.querySelector('[data-outlook-edge]').textContent = edge >= 0
+    ? `实力领先 ${edge.toFixed(1)}`
+    : `实力落后 ${Math.abs(edge).toFixed(1)}`;
+  document.querySelector('[data-outlook-summary]').textContent = unlockSummary(unlocks, nextMilestone);
+  outlookLine.classList.toggle('behind', outlook.concededGoals > 0);
+}
+
+function unlockSummary(unlocks, nextMilestone) {
+  if (unlocks.fullBuild) return '整座球场都在使用，比赛里有五个时刻可以回应';
+  if (nextMilestone === CONSTRUCTION_MILESTONES.forgiveOpening) {
+    return unlocks.extraMoment
+      ? '再建到 10 级，开场准备不足时不会被追加失球'
+      : `再建到 ${nextMilestone} 级，球场会在比赛里多给一次机会`;
+  }
+  if (nextMilestone === CONSTRUCTION_MILESTONES.fullBuild) return '建完最后几级，球场会有属于自己的比赛时刻';
+  return `再建到 ${CONSTRUCTION_MILESTONES.extraMoment} 级，比赛里会多出一个可以回应的时刻`;
+}
+
+function renderSeasonDocket() {
+  const active = isLeagueSeason();
+  seasonDocket.hidden = !active;
+  if (!active) return;
+  const round = getSeasonRound(state.season.roundIndex);
+  const opponent = getLeagueTeam(round.playerOpponentId);
+  document.querySelector('[data-season-round-label]').textContent = `第 ${state.season.seasonNumber} 赛季 · 第 ${round.round} 轮`;
+  document.querySelector('[data-season-opponent]').textContent = `对阵${opponent.name}`;
+  document.querySelector('[data-season-rank]').textContent = `当前第 ${seasonRank()} 名`;
+  document.querySelector('[data-season-actions]').textContent = `行动 ${state.season.week.actions.length} / 3`;
+  const event = getSeasonEvent(state.season.roundIndex, state.season.seasonNumber);
+  const status = document.querySelector('[data-season-incident-status]');
+  status.textContent = state.season.week.eventChoiceId
+    ? `已回应：${getSeasonEventChoice(event.id, state.season.week.eventChoiceId).label}`
+    : `待回应：${event.title}`;
+  status.classList.toggle('complete', Boolean(state.season.week.eventChoiceId));
+  renderMatchOutlook();
+}
+
+function renderSeasonConversation() {
+  const active = isLeagueSeason() && Boolean(activeSeasonNpcId);
+  seasonConversation.hidden = !active;
+  if (!active) return;
+  const npc = getSeasonNpc(activeSeasonNpcId);
+  const scheduled = getNpcSchedule(state.dayIndex, 'morning', { season: state.season }).find(item => item.id === activeSeasonNpcId);
+  const alreadyTalked = state.season.week.talkedNpcIds.includes(activeSeasonNpcId);
+  const roleLabels = { coach: '球队教练', captain: '球队队长', market: '场边小店', youth: '年轻球员', sponsor: '外部投资人', governance: '场馆评审' };
+  const sprite = document.querySelector('[data-season-npc-sprite]');
+  sprite.className = `npc-sprite ${npc.spriteClass}`;
+  document.querySelector('[data-season-npc-role]').textContent = roleLabels[npc.domain];
+  document.querySelector('[data-season-npc-name]').textContent = npc.name;
+  document.querySelector('[data-season-npc-bond]').textContent = `关系 ${state.season.relationships[activeSeasonNpcId]} / 5`;
+  document.querySelector('[data-season-npc-copy]').textContent = scheduled?.copy ?? npc.copies[state.season.roundIndex % npc.copies.length];
+  const memoryPanel = document.querySelector('[data-season-memory]');
+  const memory = scheduled?.memory ?? null;
+  const memoryDone = state.season.week.memoryNpcIds.includes(activeSeasonNpcId);
+  memoryPanel.hidden = !memory;
+  if (memory) {
+    document.querySelector('[data-season-memory-source]').textContent = memory.label;
+    document.querySelector('[data-season-memory-choice]').textContent = memory.choiceLabel;
+    document.querySelector('[data-season-memory-status]').textContent = memoryDone
+      ? '你们已经把这件事谈清楚了，关系已经改变。'
+      : '花 6 分钟，不占本轮经营行动，关系 +1。';
+    const memoryButton = document.querySelector('[data-season-memory-talk]');
+    memoryButton.disabled = memoryDone;
+    memoryButton.textContent = memoryDone ? '本轮已谈清楚' : '把这件事谈清楚';
+  }
+  document.querySelector('[data-season-response-options]').innerHTML = alreadyTalked
+    ? '<p class="season-talked-note">这轮已经认真谈过。下一轮，他会记得你这次怎么回答。</p>'
+    : npc.responses.map(response => (
+        `<button type="button" data-season-response="${response.id}"><strong>${response.label}</strong><small>${response.bond ? '关系 +1，并可能在比赛中回应' : '坚持立场，不为了好感回避分歧'}</small></button>`
+      )).join('');
+}
+
+function seasonEventEffectCopy(choice) {
+  const labels = {
+    cash: '现金', attack: '进攻', defense: '防守', cohesion: '凝聚', community: '社区',
+    facility: '球场', energy: '体力', support: '委员会', shenInfluence: '沈峤影响'
+  };
+  const effects = Object.entries(choice.effects)
+    .filter(([, value]) => value)
+    .map(([key, value]) => `${labels[key]} ${value > 0 ? '+' : ''}${value}`);
+  const relationships = Object.entries(choice.relationships)
+    .filter(([, value]) => value)
+    .map(([npcId, value]) => `${getSeasonNpc(npcId).name}关系 ${value > 0 ? '+' : ''}${value}`);
+  return [...effects, ...relationships].join(' / ');
+}
+
+function renderSeasonEvent() {
+  const active = isLeagueSeason() && Boolean(activeSeasonEventId);
+  seasonEventPanel.hidden = !active;
+  if (!active) return;
+  const event = SEASON_EVENTS.find(item => item.id === activeSeasonEventId);
+  if (!event) {
+    activeSeasonEventId = null;
+    seasonEventPanel.hidden = true;
+    return;
+  }
+  const speaker = getSeasonNpc(event.speakerId);
+  const selected = state.season.week.eventId === event.id && state.season.week.eventChoiceId
+    ? getSeasonEventChoice(event.id, state.season.week.eventChoiceId)
+    : null;
+  document.querySelector('[data-season-event-kicker]').textContent = event.kicker;
+  document.querySelector('[data-season-event-place]').textContent = event.mapId === 'training' ? '旧训练场' : '海风主赛场';
+  document.querySelector('[data-season-event-speaker]').textContent = `${speaker.name}带来的事`;
+  document.querySelector('[data-season-event-title]').textContent = event.title;
+  document.querySelector('[data-season-event-sprite]').className = `npc-sprite ${speaker.spriteClass}`;
+  document.querySelector('[data-season-event-beats]').innerHTML = event.beats.map(beat => `<p>${beat}</p>`).join('');
+  const options = document.querySelector('[data-season-event-options]');
+  options.hidden = Boolean(selected);
+  options.innerHTML = selected ? '' : event.choices.map(choice => (
+    `<button type="button" data-season-event-choice="${choice.id}"><strong>${choice.label}</strong><span>${choice.detail}</span><small>${seasonEventEffectCopy(choice)}</small></button>`
+  )).join('');
+  const result = document.querySelector('[data-season-event-result]');
+  result.hidden = !selected;
+  result.innerHTML = selected
+    ? `<span>这轮已经决定</span><strong>${selected.label}</strong><p>${selected.resultCopy}</p><small>${seasonEventEffectCopy(selected)}</small>`
+    : '';
+}
+
+function renderSeasonBoard() {
+  const active = isLeagueSeason() && seasonBoardOpen;
+  seasonBoard.hidden = !active;
+  if (!active) return;
+  document.querySelector('[data-season-board-title]').textContent = `第 ${state.season.seasonNumber} 赛季 · 第 ${state.season.roundIndex + 1} 轮`;
+  const standings = getStandings(state.season);
+  document.querySelector('[data-season-standings]').innerHTML = standings.map((row, index) => {
+    const team = getLeagueTeam(row.teamId);
+    return `<div class="season-standing-row${row.teamId === 'haifeng' ? ' is-player' : ''}"><b>${index + 1}</b><strong>${team.shortName}</strong><span>${row.played}</span><span>${row.won}-${row.drawn}-${row.lost}</span><em>${row.points} 分</em></div>`;
+  }).join('');
+  const goals = getSeasonGoalStatus(state.season, { cash: state.economy.cash });
+  document.querySelector('[data-season-goals]').innerHTML = Object.entries(SEASON_GOALS).map(([id, goal]) => {
+    const status = goals[id];
+    const progress = id === 'ranking' ? `当前第 ${status.current} 名` : `${status.current} / ${status.target}`;
+    return `<div class="season-goal${status.complete ? ' complete' : ''}"><i>${status.complete ? '完成' : '目标'}</i><strong>${goal.label}</strong><small>${progress}</small></div>`;
+  }).join('');
+  document.querySelector('[data-season-projects]').innerHTML = Object.values(SEASON_PROJECTS).map(project => {
+    const level = state.season.projects[project.id];
+    const next = project.levels[level];
+    return `<div><span>${project.label}</span><strong>${level} / 3</strong><small>${next ? `下一步 ${next.label} · ${next.cost} 元` : '已经稳定运营'}</small></div>`;
+  }).join('');
+  const history = state.season.eventHistory ?? [];
+  document.querySelector('[data-season-history]').innerHTML = history.length
+    ? history.slice(-3).reverse().map(item => {
+        const event = SEASON_EVENTS.find(candidate => candidate.id === item.eventId);
+        const choice = getSeasonEventChoice(item.eventId, item.choiceId);
+        return `<div><span>第 ${item.seasonNumber} 赛季第 ${item.round} 轮</span><strong>${event.title}</strong><small>${choice.label}</small></div>`;
+      }).join('')
+    : '<p>第一件事还在球场里等你回应。</p>';
+}
+
+function renderSeasonSummary() {
+  const active = isLeagueSeason() && state.phase === 'complete' && state.season.week.roundComplete && !seasonBoardOpen && !elitePanelOpen;
+  seasonSummary.hidden = !active;
+  if (!active) return;
+  const result = state.season.week.result;
+  const opponent = getLeagueTeam(result.opponentId);
+  const rank = seasonRank();
+  const seasonComplete = state.season.seasonComplete;
+  document.querySelector('[data-season-summary-kicker]').textContent = `海风联赛 · 第 ${state.season.roundIndex + 1} 轮`;
+  document.querySelector('[data-season-summary-title]').textContent = seasonComplete
+    ? state.season.eliteQualified ? '海风队拿到了精英邀请赛资格' : '第一个赛季留下了可以继续的球场'
+    : result.points === 3 ? '海风队把准备带进了比分' : result.points === 1 ? '这一分没有白拿' : '输掉比赛，球场仍然向前';
+  document.querySelector('[data-season-summary-copy]').textContent = seasonComplete
+    ? `七轮结束，海风队排名第 ${rank}。建设与关系不会清零，下一赛季仍能继续争取精英资格。`
+    : `本轮的三项行动、建设和谈话都已经结算。下一轮会换一个对手，也会出现新的关系回应。`;
+  document.querySelector('[data-season-summary-score]').textContent = `海风 ${result.homeGoals} : ${result.awayGoals} ${opponent.shortName}`;
+  document.querySelector('[data-season-summary-rank]').textContent = `当前第 ${rank} 名 · ${state.season.standings.find(row => row.teamId === 'haifeng').points} 分`;
+  const event = getSeasonEvent(state.season.roundIndex, state.season.seasonNumber);
+  const eventChoice = state.season.week.eventChoiceId
+    ? getSeasonEventChoice(event.id, state.season.week.eventChoiceId)
+    : null;
+  document.querySelector('[data-season-summary-event]').innerHTML = eventChoice
+    ? `<span>本轮发生了</span><strong>${event.title}</strong><small>${eventChoice.label}</small>`
+    : '<span>旧赛季记录</span><strong>这轮没有留下事件选择</strong><small>下一轮会正常出现新的球场事件</small>';
+  const goals = getSeasonGoalStatus(state.season, { cash: state.economy.cash });
+  document.querySelector('[data-season-summary-grid]').innerHTML = [
+    ['本轮行动', `${state.season.week.actions.length} 件`],
+    ['认真谈过', `${state.season.week.talkedNpcIds.length} 人`],
+    ['建设总级', `${Object.values(state.season.projects).reduce((sum, value) => sum + value, 0)} / 15`],
+    ['账上现金', `${state.economy.cash} 元`]
+  ].map(([label, value]) => `<div><span>${label}</span><strong>${value}</strong></div>`).join('');
+  const nextButton = document.querySelector('[data-season-next]');
+  nextButton.textContent = seasonComplete && goals.eliteQualified
+    ? state.season.elite.status === 'invited'
+      ? '接受精英邀请'
+      : state.season.elite.status === 'match'
+        ? '继续精英邀请赛'
+        : '查看精英赛结果'
+    : seasonComplete
+      ? '带着这些进入下一赛季'
+      : `进入第 ${state.season.roundIndex + 2} 轮`;
+  nextButton.dataset.elite = String(Boolean(goals.eliteQualified));
+}
+
+function eliteCallbackCopy(choice) {
+  if (!choice.callback) return '这是此刻的取舍，没有过去成果自动回应。';
+  const label = choice.callback === 'ranking'
+    ? '联赛前四'
+    : choice.callback === 'construction'
+      ? '六级球场建设'
+      : ELITE_PREPARATIONS[choice.callback.replace('preparation:', '')]?.label ?? '赛前准备';
+  return choice.callbackReady ? `${label}会回应这次选择。` : `${label}没有在赛前准备好。`;
+}
+
+function renderElitePanel() {
+  const elite = state.season?.elite;
+  const active = elitePanelOpen && isLeagueSeason() && state.season.seasonComplete && ['invited', 'match', 'complete'].includes(elite?.status);
+  elitePanel.hidden = !active;
+  if (!active) return;
+
+  const invitation = document.querySelector('[data-elite-invitation]');
+  const match = document.querySelector('[data-elite-match]');
+  const result = document.querySelector('[data-elite-result]');
+  invitation.hidden = elite.status !== 'invited';
+  match.hidden = elite.status !== 'match';
+  result.hidden = elite.status !== 'complete';
+  document.querySelector('[data-elite-opponent]').textContent = ELITE_OPPONENT.name;
+  document.querySelector('[data-elite-opponent-copy]').textContent = ELITE_OPPONENT.copy;
+  document.querySelector('[data-elite-title]').textContent = elite.status === 'invited'
+    ? '球场收到了一封正式邀请'
+    : elite.status === 'match'
+      ? '海风第一次站进精英赛'
+      : '这场比赛已经写进记录';
+
+  if (elite.status === 'invited') {
+    const rank = seasonRank();
+    const construction = Object.values(state.season.projects).reduce((sum, value) => sum + value, 0);
+    document.querySelector('[data-elite-qualification]').textContent = `联赛第 ${rank} 名，球场建设 ${construction} 级。两项条件一起换来了这封邀请。先决定赛前最认真做哪一件事。`;
+    document.querySelector('[data-elite-preparations]').innerHTML = Object.values(ELITE_PREPARATIONS).map(preparation => (
+      `<button type="button" data-elite-preparation="${preparation.id}"><strong>${preparation.label}</strong><span>${preparation.copy}</span><small>${preparation.callbackLabel}</small></button>`
+    )).join('');
+  }
+
+  if (elite.status === 'match') {
+    const moment = getSeasonEliteMoment(state.season);
+    document.querySelector('[data-elite-score]').textContent = `${elite.match.homeGoals} : ${elite.match.awayGoals}`;
+    document.querySelector('[data-elite-minute]').textContent = moment.minute;
+    document.querySelector('[data-elite-moment-title]').textContent = moment.title;
+    document.querySelector('[data-elite-moment-copy]').textContent = moment.copy;
+    document.querySelector('[data-elite-choices]').innerHTML = moment.choices.map(choice => (
+      `<button type="button" data-elite-choice="${choice.id}" class="${choice.callbackReady ? 'is-ready' : ''}"><strong>${choice.label}</strong><span>${choice.copy}</span><small>${eliteCallbackCopy(choice)}</small></button>`
+    )).join('');
+  }
+
+  if (elite.status === 'complete') {
+    const content = ELITE_RESULTS[elite.result.id];
+    document.querySelector('[data-elite-score]').textContent = `${elite.result.homeGoals} : ${elite.result.awayGoals}`;
+    document.querySelector('[data-elite-result-title]').textContent = content.label;
+    document.querySelector('[data-elite-result-score]').textContent = `海风 ${elite.result.homeGoals} : ${elite.result.awayGoals} 鹤岭`;
+    document.querySelector('[data-elite-result-copy]').textContent = content.copy;
+    document.querySelector('[data-elite-rewards]').innerHTML = [
+      ['奖金', `+${content.effects.cash} 元`],
+      ['凝聚', `+${content.effects.cohesion}`],
+      ['社区', `+${content.effects.community}`]
+    ].map(([label, value]) => `<div><span>${label}</span><strong>${value}</strong></div>`).join('');
+  }
+}
+
 function renderManagementControls() {
   const button = document.querySelector('[data-end-management-day]');
+  if (state.dayIndex === 16 && state.namingRights.weekComplete && weekSummaryDismissed && !isLeagueSeason()) {
+    button.hidden = false;
+    button.textContent = '进入海风联赛';
+    return;
+  }
+  if (state.dayIndex === 9 && state.management.weekComplete && weekSummaryDismissed) {
+    button.hidden = false;
+    button.textContent = '进入第二个经营周';
+    return;
+  }
   if (!isManagementWeekDay(state.dayIndex) || state.phase !== 'morning' || state.management.weekComplete) {
     button.hidden = true;
     return;
@@ -885,14 +1706,50 @@ function renderManagementControls() {
 }
 
 function renderSummary() {
+  if (isLeagueSeason()) {
+    summary.hidden = true;
+    return;
+  }
   const managementDay = isManagementWeekDay(state.dayIndex);
+  const namingDay = isNamingRightsWeekDay(state.dayIndex);
   const complete = state.phase === 'complete'
     && !state.chapterComplete
-    && !(managementDay && state.management.weekComplete);
+    && !((managementDay || namingDay) && state.management.weekComplete);
   summary.hidden = !complete;
   if (!complete) return;
 
   const day = currentDay();
+  if (namingDay) {
+    const records = state.management.dailyRecords.filter(entry => entry.dayIndex === state.dayIndex);
+    const freeRecord = records.find(entry => entry.actionId === 'free-time');
+    const mainlineRecord = records.find(entry => entry.actionId !== 'free-time');
+    const totals = getFreeActionTotals(state.namingRights.freeTime);
+    const dayCopies = {
+      10: '合同没有被任何人私下带走。周五以前，五把椅子会一起听完它。',
+      11: '五种条件都贴在墙上。它们互相冲突，但没有一张被钱盖住。',
+      12: '救命钱之外，球场又多了一件真实做成的事。',
+      13: '沈峤确实被从创办历史里抹去。承认这件事以后，问题变得更难了。',
+      14: `五张票已经落下。球场选择了“${VOTE_ROUTES[state.namingRights.voteRoute]?.label ?? '延期'}”。`,
+      15: '半张合照没有替任何人赢得辩论，但它让所有人不能再否认过去。'
+    };
+    document.querySelector('[data-summary-date]').textContent = `${day.weekday} / 春 ${day.date} 日`;
+    document.querySelector('[data-summary-title]').textContent = ACTION_COPY[getRequiredAction(state.dayIndex)].title;
+    document.querySelector('[data-summary-copy]').textContent = dayCopies[state.dayIndex];
+    document.querySelector('[data-summary-label="orders"]').textContent = '今天做了';
+    document.querySelector('[data-summary-label="repair"]').textContent = '自救金';
+    document.querySelector('[data-summary-label="money"]').textContent = '签名';
+    document.querySelector('[data-summary-label="person"]').textContent = '球场名字';
+    document.querySelector('[data-summary-orders]').textContent = freeRecord
+      ? getFreeAction(freeRecord.choiceId).label
+      : choiceLabel(mainlineRecord?.actionId, mainlineRecord?.choiceId ?? '完成');
+    document.querySelector('[data-summary-repair]').textContent = `${totals.fund} 元`;
+    document.querySelector('[data-summary-money]').textContent = `${totals.signatures} 个`;
+    document.querySelector('[data-summary-person]').textContent = state.namingRights.voteRoute
+      ? VOTE_ROUTES[state.namingRights.voteRoute].stadiumName
+      : '仍被蓝布盖着';
+    document.querySelector('[data-next-day]').textContent = `去往春 ${getCampaignDay(state.dayIndex + 1).date} 日`;
+    return;
+  }
   if (managementDay) {
     const record = state.management.dailyRecords.findLast(entry => entry.dayIndex === state.dayIndex);
     const actionId = getRequiredAction(state.dayIndex);
@@ -941,12 +1798,56 @@ function renderSummary() {
 }
 
 function renderWeekSummary() {
-  const active = Boolean(state.management?.weekComplete && state.management.settlement && !weekSummaryDismissed);
+  const active = Boolean(!isLeagueSeason() && state.management?.weekComplete && state.management.settlement && !weekSummaryDismissed);
   weekSummary.hidden = !active;
   if (!active) return;
   const settlement = state.management.settlement;
   const opponent = getOpponent(state.management.opponentId);
   const outcomeCopy = settlement.outcome === 'win' ? '赢下' : settlement.outcome === 'draw' ? '战平' : '输给';
+  const namingWeek = isNamingRightsWeekDay(state.dayIndex) && state.namingRights.weekComplete;
+  const namingReveal = document.querySelector('[data-naming-summary]');
+  const beginNamingButton = document.querySelector('[data-begin-naming-week]');
+  const beginSeasonButton = document.querySelector('[data-begin-season]');
+  if (namingWeek) {
+    const route = VOTE_ROUTES[settlement.route];
+    document.querySelector('[data-week-range]').textContent = '春 22 日至春 28 日';
+    document.querySelector('[data-week-summary-title]').textContent = '球场终于揭开了招牌';
+    document.querySelector('[data-week-summary-copy]').textContent = `${settlement.stadiumName}${outcomeCopy}${opponent.name}，来了${settlement.audience}名观众。终场比分不是唯一结果，球场的名字和决定权也一起留下了。`;
+    namingReveal.hidden = false;
+    document.querySelector('[data-final-stadium-name]').textContent = settlement.stadiumName;
+    document.querySelector('[data-final-authority]').textContent = settlement.authority;
+    document.querySelector('[data-week-label="first"]').textContent = '本周亲手做过';
+    document.querySelector('[data-week-label="second"]').textContent = '公开表决';
+    document.querySelector('[data-week-label="third"]').textContent = '沈峤';
+    document.querySelector('[data-week-label="fourth"]').textContent = '下一件难题';
+    document.querySelector('[data-week-xiaoman]').textContent = settlement.rememberedAction;
+    document.querySelector('[data-week-missed]').textContent = route.label;
+    document.querySelector('[data-week-shen]').textContent = settlement.shenCopy;
+    document.querySelector('[data-week-next-crisis]').textContent = settlement.nextCrisis;
+    document.querySelector('[data-week-score]').textContent = `${settlement.stadiumName} ${settlement.score.home} : ${settlement.score.away} ${opponent.shortName}`;
+    document.querySelector('.week-next').textContent = settlement.nextCrisis;
+    beginNamingButton.hidden = true;
+    beginSeasonButton.hidden = false;
+    const items = [
+      ['现金', `${settlement.metrics.cash}元`],
+      ['球场', settlement.metrics.facility],
+      ['凝聚', settlement.metrics.cohesion],
+      ['社区', settlement.metrics.community],
+      ['委员会', `${settlement.metrics.governance}/5`]
+    ];
+    document.querySelector('[data-week-metrics]').innerHTML = items.map(([label, value]) => (
+      `<div><span>${label}</span><strong>${value}</strong></div>`
+    )).join('');
+    return;
+  }
+  document.querySelector('[data-week-range]').textContent = '春 15 日至春 21 日';
+  namingReveal.hidden = true;
+  beginNamingButton.hidden = false;
+  beginSeasonButton.hidden = true;
+  document.querySelector('[data-week-label="first"]').textContent = '小满';
+  document.querySelector('[data-week-label="second"]').textContent = '没来得及的事';
+  document.querySelector('[data-week-label="third"]').textContent = '沈峤';
+  document.querySelector('[data-week-label="fourth"]').textContent = '下周危机';
   const character = settlement.character;
   document.querySelector('[data-week-summary-title]').textContent = character.xiaomanDecision === 'stay-trial' ? '小满决定再留一周' : '小满决定接受那份工作';
   document.querySelector('[data-week-summary-copy]').textContent = `海风球场${outcomeCopy}${opponent.name}，来了${settlement.audience}名观众。比分已经结束，但这一周真正留下的是谁能替别人作决定。`;
@@ -982,7 +1883,7 @@ function renderTraining() {
   root.classList.toggle('training-active', trainingActive);
   trainingLayer.hidden = !trainingActive;
   const hearingActive = Boolean(state.dayIndex === 9 && state.management?.matchResult && !state.episode.hearingChoice);
-  const managementModal = Boolean(decisionAction || storySceneId || activeEpisodeActivity || hearingActive);
+  const managementModal = Boolean(decisionAction || storySceneId || activeEpisodeActivity || activeFreeActivity || hearingActive || activeSeasonNpcId || activeSeasonEventId || seasonBoardOpen || elitePanelOpen || !seasonSummary.hidden);
   touchControls.hidden = trainingActive || state.phase !== 'morning' || managementModal;
   touchAction.hidden = trainingActive || state.phase !== 'morning' || managementModal;
   if (managementModal) prompt.hidden = true;
@@ -1005,9 +1906,11 @@ function renderStartCard() {
   startCard.dataset.hasSave = String(loaded.ok);
   continueButton.hidden = !loaded.ok;
   document.querySelector('[data-save-summary]').textContent = loaded.ok
-    ? `存档停在春 ${currentDay().date} 日。可以继续原进度，也可以直接从那张空白通知开始。`
+    ? isLeagueSeason()
+      ? `存档停在第 ${state.season.seasonNumber} 赛季第 ${state.season.roundIndex + 1} 轮。人物关系、建设和积分都已经保存。`
+      : `存档停在春 ${currentDay().date} 日。可以继续原进度，也可以从第一周的空白通知重新开始。`
     : loaded.reason === 'absent'
-      ? '新内容从春 15 日开始：一张空白通知、只能完成的两项承诺，以及周日中圈的五把椅子。'
+      ? '现在可以连续体验序章、两个剧情周，以及会不断延续的海风联赛。'
       : '上次存档无法读取。可以直接进入第一周故事，或从抵达的早晨重新开始。';
 }
 
@@ -1020,6 +1923,11 @@ function renderModals() {
   renderEpisodeActivity();
   renderMatchPanel();
   renderHearing();
+  renderSeasonConversation();
+  renderSeasonEvent();
+  renderSeasonBoard();
+  renderSeasonSummary();
+  renderElitePanel();
   renderStartCard();
   summaryDim.hidden = summary.hidden
     && chapterSummary.hidden
@@ -1029,14 +1937,20 @@ function renderModals() {
     && episodeActivity.hidden
     && matchPanel.hidden
     && hearingPanel.hidden
+    && seasonConversation.hidden
+    && seasonEventPanel.hidden
+    && seasonBoard.hidden
+    && seasonSummary.hidden
+    && elitePanel.hidden
     && startCard.hidden;
 }
 
 function render() {
   root.dataset.phase = state.phase;
   root.dataset.day = String(state.dayIndex);
-  root.dataset.mode = isManagementWeekDay(state.dayIndex) ? 'management' : 'prologue';
-  root.dataset.campaign = String(isManagementWeekDay(state.dayIndex));
+  root.dataset.mode = isManagementMode() ? 'management' : 'prologue';
+  root.dataset.campaign = String(isManagementMode());
+  root.dataset.season = String(isLeagueSeason());
   const details = phaseDetails();
   renderCalendar();
   document.querySelector('[data-time]').textContent = formatTime(state.minute);
@@ -1052,7 +1966,13 @@ function render() {
   }
 
   const optional = document.querySelector('[data-optional-event]');
-  if (isManagementWeekDay(state.dayIndex)) {
+  if (isLeagueSeason()) {
+    const talked = state.season.week.talkedNpcIds.map(id => getSeasonNpc(id).name);
+    optional.classList.toggle('complete', talked.length > 0);
+    document.querySelector('[data-relationship-status]').textContent = talked.length
+      ? `本轮和${talked.join('、')}认真谈过`
+      : '本轮还没有和场上的人认真谈过';
+  } else if (isCampaignDay(state.dayIndex)) {
     const talked = getNpcSchedule(state.dayIndex, 'morning', { opponentId: state.management.opponentId, episode: state.episode })
       .filter(npc => state.events.includes(`talk-${npc.id}-day-${state.dayIndex}`))
       .map(npc => npc.name);
@@ -1074,6 +1994,7 @@ function render() {
   renderShop();
   renderRepairs();
   renderManagementMetrics();
+  renderSeasonDocket();
   renderTraining();
   renderModals();
   renderManagementControls();
@@ -1123,7 +2044,7 @@ function resolveTrainingShot(pointer = trainingPointer) {
 }
 
 function openManagementAction(actionId) {
-  if (!isManagementWeekDay(state.dayIndex) || state.phase !== 'morning') return false;
+  if (!isCampaignDay(state.dayIndex) || state.phase !== 'morning') return false;
   notes.hidden = true;
   destination = null;
   pendingInteraction = null;
@@ -1136,14 +2057,37 @@ function openManagementAction(actionId) {
     render();
     return true;
   }
-  openStoryScene(getEpisodeDay(state.dayIndex).sceneId);
+  if (actionId === 'naming-match' && state.namingRights.match && !state.namingRights.weekComplete) {
+    decisionAction = 'play-naming-match';
+    render();
+    return true;
+  }
+  openStoryScene(isNamingRightsWeekDay(state.dayIndex)
+    ? getNamingDay(state.dayIndex).sceneId
+    : getEpisodeDay(state.dayIndex).sceneId);
   return true;
 }
 
 function applyDecisionChoice(choiceId) {
-  if (!decisionAction || decisionAction === 'play-match') return false;
+  if (!decisionAction || ['play-match', 'play-naming-match', 'play-season-match'].includes(decisionAction)) return false;
   const previous = state;
-  state = decisionAction === 'resolve-shortfall' ? resolveManagementShortfall(state, choiceId) : state;
+  if (decisionAction === 'resolve-shortfall') state = resolveManagementShortfall(state, choiceId);
+  if (decisionAction.startsWith('season-action:')) state = chooseSeasonAction(state, choiceId);
+  if (decisionAction.startsWith('season-project:')) {
+    const projectId = decisionAction.slice('season-project:'.length);
+    const levelBefore = state.season.projects[projectId];
+    state = choiceId.startsWith('visit:')
+      ? visitSeasonProject(state, choiceId.slice('visit:'.length))
+      : buildSeasonProject(state, choiceId);
+    if (state.season.projects[projectId] > levelBefore) {
+      recentProjectBuildId = projectId;
+      window.clearTimeout(constructionRevealTimer);
+      constructionRevealTimer = window.setTimeout(() => {
+        document.querySelector(`[data-construction-project="${projectId}"]`)?.classList.remove('is-revealing');
+        recentProjectBuildId = null;
+      }, reducedMotion.matches ? 0 : 1400);
+    }
+  }
   const changed = state !== previous;
   if (changed) {
     showToast(state.journal.at(-1)?.text);
@@ -1176,6 +2120,22 @@ function applyStoryAction(actionId) {
     decisionAction = 'play-match';
   } else if (actionId.startsWith('hearing:')) {
     state = completeEpisodeHearing(state, actionId.split(':')[1]);
+  } else if (['hold-public-vote', 'write-conditions', 'open-free-time', 'acknowledge-history'].includes(actionId)) {
+    const requiredAction = getRequiredAction(state.dayIndex);
+    state = completeNamingMainline(state, requiredAction, actionId);
+  } else if (actionId.startsWith('naming-vote:')) {
+    state = completeNamingMainline(state, 'naming-vote', actionId.slice('naming-vote:'.length));
+  } else if (actionId.startsWith('naming-response:')) {
+    state = completeNamingMainline(state, 'naming-response', actionId.slice('naming-response:'.length));
+  } else if (actionId === 'start-naming-match') {
+    state = startSecondWeeklyMatch(state);
+    if (!state.namingRights.match) {
+      showToast(state.journal.at(-1)?.text);
+      render();
+      return false;
+    }
+    storySceneId = null;
+    decisionAction = 'play-naming-match';
   } else {
     return false;
   }
@@ -1193,11 +2153,26 @@ function applyStoryAction(actionId) {
 }
 
 function applyHighlightChoice(choiceId) {
-  if (decisionAction !== 'play-match') return false;
+  if (!['play-match', 'play-naming-match', 'play-season-match'].includes(decisionAction)) return false;
   const previous = state;
-  state = chooseMatchHighlight(state, choiceId);
+  const namingMatch = decisionAction === 'play-naming-match';
+  const seasonMatch = decisionAction === 'play-season-match';
+  state = seasonMatch
+    ? resolveLeagueMatchChoice(state, choiceId)
+    : namingMatch
+      ? resolveSecondWeeklyMatchChoice(state, choiceId)
+      : chooseMatchHighlight(state, choiceId);
   if (state !== previous) persist();
-  if (state.management.matchResult) {
+  if (seasonMatch && state.season.week.roundComplete) {
+    decisionAction = null;
+    const result = state.season.week.result;
+    showToast(`终场 ${result.homeGoals} 比 ${result.awayGoals}。积分榜已经更新。`);
+  } else if (namingMatch && state.namingRights.weekComplete) {
+    decisionAction = null;
+    weekSummaryDismissed = false;
+    const result = state.namingRights.settlement;
+    showToast(`终场 ${result.score.home} 比 ${result.score.away}。蓝布正在从招牌上落下来。`);
+  } else if (!seasonMatch && !namingMatch && state.management.matchResult) {
     decisionAction = null;
     const result = state.management.matchResult;
     showToast(`终场 ${result.score.home} 比 ${result.score.away}。${result.crowdMood}。`);
@@ -1268,13 +2243,61 @@ function interact(id) {
     successful = changeMap(object);
   }
   if (object.kind === 'npc') {
-    successful = applyTransition(
-      current => recordNpcConversation(current, object.npc.id, object.npc.copy)
-    );
-    showSpeech(object.npc.name, object.npc.copy, { x: object.x, y: Math.max(20, object.y - 12) }, 5200);
+    if (object.npc.seasonNpc) {
+      activeSeasonNpcId = object.npc.id;
+      destination = null;
+      pendingInteraction = null;
+      movementRoute = [];
+      render();
+      successful = true;
+    } else {
+      successful = applyTransition(
+        current => recordNpcConversation(current, object.npc.id, object.npc.copy)
+      );
+      showSpeech(object.npc.name, object.npc.copy, { x: object.x, y: Math.max(20, object.y - 12) }, 5200);
+    }
   }
   if (object.kind === 'mainline') {
     successful = openManagementAction(object.actionId);
+  }
+  if (object.kind === 'free-action') {
+    successful = startNamingFreeActivity(object.actionId.split(':')[1]);
+  }
+  if (object.kind === 'season-action') {
+    decisionAction = `season-action:${object.actionId}`;
+    destination = null;
+    pendingInteraction = null;
+    movementRoute = [];
+    render();
+    successful = true;
+  }
+  if (object.kind === 'season-project') {
+    decisionAction = `season-project:${object.projectId}`;
+    destination = null;
+    pendingInteraction = null;
+    movementRoute = [];
+    render();
+    successful = true;
+  }
+  if (object.kind === 'season-event') {
+    activeSeasonEventId = object.eventId;
+    destination = null;
+    pendingInteraction = null;
+    movementRoute = [];
+    render();
+    successful = true;
+  }
+  if (object.kind === 'season-match') {
+    const previous = state;
+    state = startLeagueMatch(state);
+    successful = Boolean(state.season.match && state !== previous);
+    if (successful) {
+      decisionAction = 'play-season-match';
+      persist();
+    } else {
+      showToast(state.journal.at(-1)?.text);
+    }
+    render();
   }
   return successful;
 }
@@ -1306,8 +2329,8 @@ function updateDirection(dx, dy) {
 
 function tryMove(dxPixels, dyPixels) {
   if (!dxPixels && !dyPixels) return false;
-  const nextX = position.x + dxPixels / plane.clientWidth * 100;
-  const nextY = position.y + dyPixels / plane.clientHeight * 100;
+  const nextX = position.x + dxPixels / viewMetrics.planeWidth * 100;
+  const nextY = position.y + dyPixels / viewMetrics.planeHeight * 100;
   let changed = false;
 
   if (canStand(nextX, position.y)) {
@@ -1335,11 +2358,18 @@ function advanceMovement(deltaSeconds, timestamp) {
     || decisionAction
     || storySceneId
     || activeEpisodeActivity
+    || activeFreeActivity
+    || activeSeasonNpcId
+    || activeSeasonEventId
+    || seasonBoardOpen
+    || elitePanelOpen
     || !hearingPanel.hidden
     || state.phase !== 'morning'
     || !summary.hidden
     || !chapterSummary.hidden
-    || (!weekSummary.hidden && !weekSummaryDismissed)) {
+    || (!weekSummary.hidden && !weekSummaryDismissed)
+    || !seasonSummary.hidden
+    || !elitePanel.hidden) {
     moving = false;
     player.classList.remove('moving');
     player.dataset.frame = '0';
@@ -1386,8 +2416,8 @@ function advanceMovement(deltaSeconds, timestamp) {
 }
 
 function updatePlayerVisual() {
-  player.style.setProperty('--screen-x', `${position.x * plane.clientWidth / 100}px`);
-  player.style.setProperty('--screen-y', `${position.y * plane.clientHeight / 100}px`);
+  player.style.setProperty('--screen-x', `${position.x * viewMetrics.planeWidth / 100}px`);
+  player.style.setProperty('--screen-y', `${position.y * viewMetrics.planeHeight / 100}px`);
 }
 
 function clamp(value, min, max) {
@@ -1395,23 +2425,20 @@ function clamp(value, min, max) {
 }
 
 function fitWorld() {
-  const viewportWidth = viewport.clientWidth;
-  const viewportHeight = viewport.clientHeight;
   const map = getMap(activeMapId);
-  const scale = Math.max(viewportWidth / map.width, viewportHeight / map.height);
+  const scale = Math.max(viewMetrics.viewportWidth / map.width, viewMetrics.viewportHeight / map.height);
   plane.style.width = `${Math.ceil(map.width * scale)}px`;
   plane.style.height = `${Math.ceil(map.height * scale)}px`;
+  refreshViewMetrics();
   updatePlayerVisual();
   updateCamera();
 }
 
 function updateCamera() {
-  const viewportWidth = viewport.clientWidth;
-  const viewportHeight = viewport.clientHeight;
-  const focusX = position.x * plane.clientWidth / 100;
-  const focusY = position.y * plane.clientHeight / 100;
-  const cameraX = clamp(viewportWidth / 2 - focusX, viewportWidth - plane.clientWidth, 0);
-  const cameraY = clamp(viewportHeight / 2 - focusY, viewportHeight - plane.clientHeight, 0);
+  const focusX = position.x * viewMetrics.planeWidth / 100;
+  const focusY = position.y * viewMetrics.planeHeight / 100;
+  const cameraX = clamp(viewMetrics.viewportWidth / 2 - focusX, viewMetrics.viewportWidth - viewMetrics.planeWidth, 0);
+  const cameraY = clamp(viewMetrics.viewportHeight / 2 - focusY, viewMetrics.viewportHeight - viewMetrics.planeHeight, 0);
   plane.style.setProperty('--camera-x', `${cameraX}px`);
   plane.style.setProperty('--camera-y', `${cameraY}px`);
 }
@@ -1421,17 +2448,24 @@ function pointerAt(timestamp) {
   return cycle <= 0.5 ? cycle * 2 : 2 - cycle * 2;
 }
 
+let visualDirty = true;
+
 function frame(timestamp) {
   const delta = Math.min(0.04, Math.max(0, (timestamp - lastFrame) / 1000));
   lastFrame = timestamp;
   advanceMovement(delta, timestamp);
   if (trainingActive && !reducedMotion.matches) {
     trainingPointer = pointerAt(timestamp);
-    document.querySelector('[data-training-pointer]').style.left = `${trainingPointer * 100}%`;
+    const pointer = document.querySelector('[data-training-pointer]');
+    if (pointer) pointer.style.left = `${trainingPointer * 100}%`;
+    visualDirty = true;
   }
-  updatePlayerVisual();
-  updateCamera();
-  if (state.phase === 'morning') updateProximity();
+  if (moving || destination || visualDirty) {
+    updatePlayerVisual();
+    updateCamera();
+    if (state.phase === 'morning') updateProximity();
+    visualDirty = moving || Boolean(destination);
+  }
   requestAnimationFrame(frame);
 }
 
@@ -1448,6 +2482,10 @@ function enterManagementWeek(nextState) {
   storySceneId = null;
   activeEpisodeActivity = null;
   activePromiseId = null;
+  activeFreeActivity = null;
+  activeSeasonNpcId = null;
+  activeSeasonEventId = null;
+  seasonBoardOpen = false;
   ledgerOpen = false;
   directWeekArmed = false;
   weekSummaryDismissed = false;
@@ -1478,14 +2516,103 @@ function startDirectManagementWeek() {
   return enterManagementWeek(createFirstWeekEntryState());
 }
 
+function startNamingRightsWeek() {
+  const previous = state;
+  const nextState = beginNamingRightsWeek(state);
+  if (nextState === previous || !isNamingRightsWeekDay(nextState.dayIndex)) {
+    state = nextState;
+    showToast(state.journal.at(-1)?.text);
+    render();
+    return false;
+  }
+  state = nextState;
+  hasStarted = true;
+  activeMapId = 'stadium';
+  state.world.mapId = activeMapId;
+  position = { ...(state.world.positions.stadium ?? getMap('stadium').start) };
+  destination = null;
+  pendingInteraction = null;
+  movementRoute = [];
+  decisionAction = null;
+  storySceneId = null;
+  activeEpisodeActivity = null;
+  activePromiseId = null;
+  activeFreeActivity = null;
+  ledgerOpen = false;
+  weekSummaryDismissed = false;
+  speech.hidden = true;
+  persist();
+  render();
+  fitWorld();
+  showToast('春22日。蓝色冠名布已经盖住旧招牌。');
+  return true;
+}
+
+function enterLeagueSeason() {
+  const previous = state;
+  state = beginLeagueSeason(state);
+  if (state === previous || !state.season.active) {
+    showToast(state.journal.at(-1)?.text);
+    render();
+    return false;
+  }
+  hasStarted = true;
+  activeMapId = 'stadium';
+  state.world.mapId = activeMapId;
+  position = { ...(state.world.positions.stadium ?? getMap('stadium').start) };
+  destination = null;
+  pendingInteraction = null;
+  movementRoute = [];
+  decisionAction = null;
+  storySceneId = null;
+  activeEpisodeActivity = null;
+  activePromiseId = null;
+  activeFreeActivity = null;
+  activeSeasonNpcId = null;
+  activeSeasonEventId = null;
+  seasonBoardOpen = false;
+  ledgerOpen = false;
+  weekSummaryDismissed = true;
+  speech.hidden = true;
+  persist();
+  render();
+  fitWorld();
+  showToast('七轮海风联赛开始。先在两座场地安排本轮的三件事。');
+  return true;
+}
+
+function continueLeagueSeason() {
+  if (!isLeagueSeason() || !state.season.week.roundComplete) return false;
+  const previous = state;
+  state = state.season.seasonComplete ? beginNextLeagueSeason(state) : advanceLeagueRound(state);
+  if (state === previous) return false;
+  activeMapId = 'stadium';
+  state.world.mapId = activeMapId;
+  position = { ...(state.world.positions.stadium ?? getMap('stadium').start) };
+  destination = null;
+  pendingInteraction = null;
+  movementRoute = [];
+  decisionAction = null;
+  activeSeasonNpcId = null;
+  activeSeasonEventId = null;
+  seasonBoardOpen = false;
+  elitePanelOpen = false;
+  notes.hidden = true;
+  persist();
+  render();
+  fitWorld();
+  showToast(`第 ${state.season.seasonNumber} 赛季，第 ${state.season.roundIndex + 1} 轮开始。`);
+  return true;
+}
+
 function goToNextDay() {
   const previousDay = state.dayIndex;
   const previousChapter = state.chapterComplete;
-  state = isManagementWeekDay(state.dayIndex) ? advanceCampaignDay(state) : advanceDay(state);
+  state = isCampaignDay(state.dayIndex) ? advanceCampaignDay(state) : advanceDay(state);
   const successful = state.dayIndex !== previousDay || state.chapterComplete !== previousChapter;
   showToast(state.journal.at(-1)?.text);
   if (state.dayIndex !== previousDay) {
-    activeMapId = isManagementWeekDay(state.dayIndex) ? getCampaignDay(state.dayIndex).defaultMap : 'training';
+    activeMapId = isCampaignDay(state.dayIndex) ? getCampaignDay(state.dayIndex).defaultMap : 'training';
     state.world.mapId = activeMapId;
     position = { ...(state.world.positions[activeMapId] ?? getMap(activeMapId).start) };
     state.world.positions[activeMapId] = { ...position };
@@ -1498,6 +2625,7 @@ function goToNextDay() {
     storySceneId = null;
     activeEpisodeActivity = null;
     activePromiseId = null;
+    activeFreeActivity = null;
     decisionAction = null;
   }
   if (successful) persist();
@@ -1527,6 +2655,10 @@ function resetGame() {
   promiseDraft = [];
   activeEpisodeActivity = null;
   activePromiseId = null;
+  activeFreeActivity = null;
+  activeSeasonNpcId = null;
+  activeSeasonEventId = null;
+  seasonBoardOpen = false;
   ledgerOpen = false;
   weekSummaryDismissed = false;
   speech.hidden = true;
@@ -1610,6 +2742,65 @@ document.querySelector('[data-decision-close]').addEventListener('click', () => 
   render();
 });
 
+document.querySelector('[data-season-response-options]').addEventListener('click', event => {
+  const button = event.target.closest('[data-season-response]');
+  if (!button || !activeSeasonNpcId) return;
+  const previous = state;
+  state = chooseSeasonNpcResponse(state, activeSeasonNpcId, button.dataset.seasonResponse);
+  if (state !== previous) {
+    showToast(state.journal.at(-1)?.text);
+    persist();
+  }
+  render();
+});
+
+document.querySelector('[data-season-memory-talk]').addEventListener('click', () => {
+  if (!activeSeasonNpcId) return;
+  const previous = state;
+  state = chooseSeasonNpcMemory(state, activeSeasonNpcId);
+  if (state !== previous && state.season.week.memoryNpcIds.includes(activeSeasonNpcId)) {
+    showToast(state.journal.at(-1)?.text);
+    persist();
+  }
+  render();
+});
+
+document.querySelector('[data-season-conversation-close]').addEventListener('click', () => {
+  activeSeasonNpcId = null;
+  render();
+  viewport.focus();
+});
+
+document.querySelector('[data-season-event-options]').addEventListener('click', event => {
+  const button = event.target.closest('[data-season-event-choice]');
+  if (!button || !activeSeasonEventId || state.season.week.eventChoiceId) return;
+  const previous = state;
+  state = chooseSeasonEventDecision(state, activeSeasonEventId, button.dataset.seasonEventChoice);
+  if (state !== previous && state.season.week.eventChoiceId) {
+    showToast(state.journal.at(-1)?.text);
+    persist();
+  }
+  render();
+});
+
+document.querySelector('[data-season-event-close]').addEventListener('click', () => {
+  activeSeasonEventId = null;
+  render();
+  viewport.focus();
+});
+
+document.querySelector('[data-season-board-open]').addEventListener('click', () => {
+  if (!isLeagueSeason()) return;
+  seasonBoardOpen = true;
+  render();
+});
+
+document.querySelector('[data-season-board-close]').addEventListener('click', () => {
+  seasonBoardOpen = false;
+  render();
+  viewport.focus();
+});
+
 document.querySelector('[data-story-options]').addEventListener('click', event => {
   const button = event.target.closest('[data-story-action]');
   if (button && !button.disabled) applyStoryAction(button.dataset.storyAction);
@@ -1637,6 +2828,15 @@ document.querySelector('[data-story-close]').addEventListener('click', () => {
 });
 
 document.querySelector('[data-episode-activity]').addEventListener('click', event => {
+  if (activeFreeActivity) {
+    const choice = event.target.closest('[data-free-quality]');
+    if (choice) {
+      takeNamingFreeChoice(Number(choice.dataset.freeQuality), choice.textContent.trim());
+      return;
+    }
+    if (event.target.closest('[data-free-finish]')) finishNamingFreeActivity();
+    return;
+  }
   const pass = event.target.closest('[data-pass-value]');
   if (pass && activeEpisodeActivity?.type === 'train') {
     activeEpisodeActivity = takePass(activeEpisodeActivity, Number(pass.dataset.passValue));
@@ -1666,6 +2866,10 @@ document.querySelector('[data-episode-activity]').addEventListener('click', even
 });
 
 document.querySelector('[data-activity-close]').addEventListener('click', () => {
+  if (activeFreeActivity) {
+    showToast('这件事已经开始了。做完三个小步骤，今天就能安心结束。');
+    return;
+  }
   activeEpisodeActivity = null;
   activePromiseId = null;
   render();
@@ -1678,8 +2882,16 @@ document.querySelector('[data-hearing-options]').addEventListener('click', event
 });
 
 document.querySelector('[data-care-open]').addEventListener('click', () => {
-  if (!isManagementWeekDay(state.dayIndex)) return;
-  openStoryScene(getEpisodeDay(state.dayIndex).sceneId, { readOnly: isEpisodeDayResolved() });
+  if (isLeagueSeason()) {
+    seasonBoardOpen = true;
+    render();
+    return;
+  }
+  if (!isCampaignDay(state.dayIndex)) return;
+  openStoryScene(
+    isNamingRightsWeekDay(state.dayIndex) ? getNamingDay(state.dayIndex).sceneId : getEpisodeDay(state.dayIndex).sceneId,
+    { readOnly: isCurrentCampaignDayResolved() }
+  );
 });
 
 document.querySelector('[data-ledger-toggle]').addEventListener('click', () => {
@@ -1693,6 +2905,14 @@ document.querySelector('[data-match-options]').addEventListener('click', event =
 });
 
 document.querySelector('[data-end-management-day]').addEventListener('click', () => {
+  if (state.dayIndex === 9 && state.management.weekComplete) {
+    startNamingRightsWeek();
+    return;
+  }
+  if (state.dayIndex === 16 && state.namingRights.weekComplete) {
+    enterLeagueSeason();
+    return;
+  }
   const previous = state;
   state = finishManagementDay(state);
   showToast(state.journal.at(-1)?.text);
@@ -1709,6 +2929,63 @@ document.querySelector('[data-week-walk]').addEventListener('click', () => {
   persist();
   render();
   viewport.focus();
+});
+
+document.querySelector('[data-begin-naming-week]').addEventListener('click', startNamingRightsWeek);
+document.querySelector('[data-begin-season]').addEventListener('click', enterLeagueSeason);
+
+document.querySelector('[data-season-summary-board]').addEventListener('click', () => {
+  seasonBoardOpen = true;
+  render();
+});
+
+document.querySelector('[data-season-next]').addEventListener('click', () => {
+  if (state.season?.seasonComplete && state.season.eliteQualified && ['invited', 'match', 'complete'].includes(state.season.elite?.status)) {
+    elitePanelOpen = true;
+    render();
+    return;
+  }
+  continueLeagueSeason();
+});
+
+document.querySelector('[data-elite-preparations]').addEventListener('click', event => {
+  const button = event.target.closest('[data-elite-preparation]');
+  if (!button) return;
+  const previous = state;
+  state = chooseElitePreparation(state, button.dataset.elitePreparation);
+  if (state !== previous && state.season.elite.status === 'match') {
+    showToast(state.journal.at(-1)?.text);
+    persist();
+  }
+  render();
+});
+
+document.querySelector('[data-elite-choices]').addEventListener('click', event => {
+  const button = event.target.closest('[data-elite-choice]');
+  if (!button) return;
+  const previous = state;
+  state = chooseEliteMatchChoice(state, button.dataset.eliteChoice);
+  if (state !== previous) {
+    showToast(state.journal.at(-1)?.text);
+    persist();
+  }
+  render();
+});
+
+document.querySelector('[data-elite-close]').addEventListener('click', () => {
+  elitePanelOpen = false;
+  render();
+  viewport.focus();
+});
+
+document.querySelector('[data-elite-skip]').addEventListener('click', () => {
+  elitePanelOpen = false;
+  continueLeagueSeason();
+});
+
+document.querySelector('[data-elite-next]').addEventListener('click', () => {
+  elitePanelOpen = false;
+  continueLeagueSeason();
 });
 
 document.querySelector('[data-week-restart]').addEventListener('click', event => {
@@ -1836,6 +3113,9 @@ window.__integratedDayDebug = {
   walkToObject,
   interact,
   openManagementAction,
+  beginNamingRightsWeek: startNamingRightsWeek,
+  startNamingFreeActivity,
+  finishNamingFreeActivity,
   chooseDecision: applyDecisionChoice,
   chooseHighlight: applyHighlightChoice,
   finishManagementDay: () => {
@@ -1848,6 +3128,12 @@ window.__integratedDayDebug = {
   advanceCampaignDay: goToNextDay,
   shootAt: value => resolveTrainingShot(value),
   isMoving: () => moving || Boolean(destination),
+  setSeasonProjects: levels => {
+    if (!state.season) return false;
+    state.season.projects = { ...state.season.projects, ...levels };
+    render();
+    return true;
+  },
   hasSave: () => loadSave(localStorage).ok,
   clearProjectSave: () => clearSave(localStorage)
 };

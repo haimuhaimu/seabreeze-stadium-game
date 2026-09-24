@@ -232,6 +232,130 @@ async function assertInsideViewport(selector) {
   assert(result.left >= -1 && result.top >= -1 && result.right <= result.width + 1 && result.bottom <= result.height + 1, `${selector} leaves the viewport`);
 }
 
+async function loadQualifiedEliteFixture() {
+  const prepared = await evaluate(`(async () => {
+    const { writeSave } = await import('./save-game.js');
+    const { offerEliteInvitation } = await import('./elite-state.js');
+    const game = window.__integratedDayDebug.getState();
+    game.dayIndex = 23;
+    game.phase = 'complete';
+    game.minute = 1100;
+    game.world.mapId = 'stadium';
+    game.season.active = true;
+    game.season.seasonNumber = 1;
+    game.season.roundIndex = 6;
+    game.season.projects = { stands: 3, clinic: 3, academy: 0, market: 0, lights: 0 };
+    game.season.week = {
+      actions: ['train-attack', 'community-open', 'train-defense'],
+      talkedNpcIds: [],
+      npcResponses: {},
+      helpTags: ['community'],
+      memoryNpcIds: [],
+      eventId: null,
+      eventChoiceId: null,
+      eventTag: null,
+      roundComplete: true,
+      result: { opponentId: 'harbor-workers', homeGoals: 2, awayGoals: 1, points: 3 }
+    };
+    game.season.match = null;
+    game.season.seasonComplete = true;
+    game.season.eliteQualified = true;
+    game.season.goals = {
+      ranking: { complete: true, current: 2, target: 4 },
+      construction: { complete: true, current: 6, target: 6 },
+      people: { complete: false, current: 2, target: 3 },
+      finance: { complete: false, current: game.economy.cash, target: 180 },
+      eliteQualified: true
+    };
+    game.season.elite = offerEliteInvitation(game.season.elite, 1);
+    writeSave(localStorage, game, { x: 52, y: 68 }, 'stadium');
+    return { cash: game.economy.cash, cohesion: game.roster.cohesion, community: game.communitySupport };
+  })()`);
+  await navigate();
+  await click('[data-continue]');
+  await waitFor('!document.querySelector("[data-season-summary]").hidden', 'The qualified season summary did not restore');
+  return prepared;
+}
+
+async function loadUnqualifiedSeasonFixture() {
+  await evaluate(`(async () => {
+    const { writeSave } = await import('./save-game.js');
+    const game = window.__integratedDayDebug.getState();
+    game.dayIndex = 23;
+    game.phase = 'complete';
+    game.minute = 1100;
+    game.world.mapId = 'stadium';
+    game.season.active = true;
+    game.season.seasonNumber = 1;
+    game.season.roundIndex = 6;
+    game.season.projects = { stands: 1, clinic: 0, academy: 0, market: 0, lights: 0 };
+    game.season.week = {
+      actions: ['rest', 'shop-day', 'maintenance'],
+      talkedNpcIds: [],
+      npcResponses: {},
+      helpTags: [],
+      memoryNpcIds: [],
+      eventId: null,
+      eventChoiceId: null,
+      eventTag: null,
+      roundComplete: true,
+      result: { opponentId: 'harbor-workers', homeGoals: 0, awayGoals: 2, points: 0 }
+    };
+    game.season.match = null;
+    game.season.seasonComplete = true;
+    game.season.eliteQualified = false;
+    game.season.goals = {
+      ranking: { complete: false, current: 7, target: 4 },
+      construction: { complete: false, current: 1, target: 6 },
+      people: { complete: false, current: 1, target: 3 },
+      finance: { complete: false, current: game.economy.cash, target: 180 },
+      eliteQualified: false
+    };
+    writeSave(localStorage, game, { x: 52, y: 68 }, 'stadium');
+    return true;
+  })()`);
+  await navigate();
+  await click('[data-continue]');
+  await waitFor('!document.querySelector("[data-season-summary]").hidden', 'The unqualified season summary did not restore');
+}
+
+async function loadLivingConstructionFixture() {
+  await evaluate(`(async () => {
+    const { writeSave } = await import('./save-game.js');
+    const game = window.__integratedDayDebug.getState();
+    game.dayIndex = 17;
+    game.phase = 'morning';
+    game.minute = 610;
+    game.world.mapId = 'stadium';
+    game.season.active = true;
+    game.season.seasonNumber = 2;
+    game.season.roundIndex = 0;
+    game.season.projects = { stands: 3, clinic: 2, academy: 1, market: 2, lights: 0 };
+    game.season.week = {
+      actions: [],
+      talkedNpcIds: [],
+      npcResponses: {},
+      helpTags: [],
+      memoryNpcIds: [],
+      visitedProjectIds: [],
+      eventId: null,
+      eventChoiceId: null,
+      eventTag: null,
+      roundComplete: false,
+      result: null
+    };
+    game.season.match = null;
+    game.season.seasonComplete = false;
+    game.season.eliteQualified = false;
+    game.season.goals = null;
+    writeSave(localStorage, game, { x: 52, y: 68 }, 'stadium');
+    return true;
+  })()`);
+  await navigate();
+  await click('[data-continue]');
+  await waitFor('window.__integratedDayDebug.getState().season.projects.stands === 3', 'The mixed construction fixture did not restore');
+}
+
 async function completeEpisodeDay(dayIndex) {
   assert(await evaluate(`window.__integratedDayDebug.getState().dayIndex === ${dayIndex}`), `Episode day ${dayIndex} did not begin`);
   await waitFor('!document.querySelector("[data-end-management-day]").hidden', 'Management day cannot be closed');
@@ -240,6 +364,21 @@ async function completeEpisodeDay(dayIndex) {
   await assertInsideViewport('[data-summary]');
   await click('[data-next-day]');
   await waitFor(`window.__integratedDayDebug.getState().dayIndex === ${dayIndex + 1}`, `Episode day ${dayIndex + 1} did not begin`);
+}
+
+async function completeNamingFreeAction(objectId) {
+  await walkAndWait(objectId, '!document.querySelector("[data-episode-activity]").hidden');
+  for (let step = 0; step < 3; step += 1) {
+    await click('[data-free-quality="1"]');
+  }
+  await click('[data-free-finish]');
+  await waitFor('window.__integratedDayDebug.getState().phase === "complete"', 'Naming free action did not finish the day');
+}
+
+async function advanceNamingDay(dayIndex) {
+  await assertInsideViewport('[data-summary]');
+  await click('[data-next-day]');
+  await waitFor(`window.__integratedDayDebug.getState().dayIndex === ${dayIndex + 1}`, `Naming day ${dayIndex + 1} did not begin`);
 }
 
 async function testThreeDayLoop() {
@@ -253,7 +392,7 @@ async function testThreeDayLoop() {
     continueHidden: document.querySelector('[data-continue]').hidden
   })`);
   assert(launch.visible, 'A fresh profile does not show the new launch screen');
-  assert(launch.title.includes('第一周'), 'The launch screen does not make the story week visible');
+  assert(launch.title.includes('不会轻易倒下'), 'The launch screen does not introduce the complete stadium goal');
   assert(launch.directLabel === '直接进入春 15 日', 'The direct story-week entry is missing');
   assert(launch.previewLoaded, 'The main stadium preview did not load');
   assert(launch.continueHidden, 'A fresh profile should not offer an absent save');
@@ -300,6 +439,8 @@ async function testThreeDayLoop() {
       && document.querySelector('.world-map').src.includes('seaside-club-handpainted-v4.png'),
     playerAtlas: getComputedStyle(document.querySelector('.player-sprite')).backgroundImage.includes('an-ruotong-unified-v4-aligned.png'),
     teamAtlas: getComputedStyle(document.querySelector('.npc-guo')).backgroundImage.includes('team-roster-handpainted-v2-aligned.png'),
+    itemAtlas: getComputedStyle(document.querySelector('.item-sprite')).backgroundImage.includes('item-atlas-handpainted-v2.png'),
+    itemRendering: getComputedStyle(document.querySelector('.item-sprite')).imageRendering,
     startHidden: document.querySelector('[data-start-card]').hidden
   })`);
   assert(desktop.phase === 'morning' && desktop.date === '春 12', 'The chapter does not begin on spring 12');
@@ -307,6 +448,8 @@ async function testThreeDayLoop() {
   assert(desktop.mapLoaded, 'The seaside map did not load');
   assert(desktop.playerAtlas, 'The unified An Ruotong atlas is not connected');
   assert(desktop.teamAtlas, 'The complete team atlas is not connected');
+  assert(desktop.itemAtlas, 'The hand-painted item atlas is not connected');
+  assert(desktop.itemRendering === 'auto', 'The hand-painted item atlas is still forced into pixel rendering');
   assert(desktop.startHidden, 'Starting the prologue did not close the launch screen');
 
   const beforeWalk = await evaluate('window.__integratedDayDebug.getPosition()');
@@ -542,6 +685,355 @@ async function testThreeDayLoop() {
   assert((await text('[data-save-summary]')).includes('春 21 日'), 'Completed week save has the wrong date');
   await click('[data-continue]');
   await assertInsideViewport('[data-week-summary]');
+
+  assert(!await evaluate('document.querySelector("[data-begin-naming-week]").hidden'), 'The second week entry is missing from the first-week settlement');
+  await click('[data-begin-naming-week]');
+  await waitFor('window.__integratedDayDebug.getState().dayIndex === 10', 'The naming-rights week did not begin');
+  assert(await evaluate('!document.querySelector("[data-stadium-sign]").hidden'), 'The covered stadium sign is missing');
+  assert(await evaluate(`(() => {
+    const sign = document.querySelector('.stadium-name-old');
+    const cloth = document.querySelector('.stadium-name-cloth');
+    return getComputedStyle(sign).backgroundImage.includes('stadium-sign-frame-v2.png')
+      && getComputedStyle(cloth).backgroundImage.includes('stadium-sponsor-cloth-v2.png');
+  })()`), 'The remastered stadium sign assets are not connected');
+  assert((await text('[data-care-title]')).includes('蓝布'), 'The naming-rights HUD does not introduce the covered sign');
+  await capture('naming-sign');
+
+  await walkAndWait('guest-gate', '!document.querySelector("[data-story-scene]").hidden');
+  assert((await text('[data-story-prop-caption]')).includes('蓝布'), 'The naming proposal is missing its physical prop');
+  assert(await evaluate('getComputedStyle(document.querySelector("[data-story-prop] > div")).backgroundImage.includes("naming-rights-memory-strip-v1.png")'), 'The naming-rights memory strip is not connected');
+  await capture('naming-proposal');
+  await click('[data-story-action="hold-public-vote"]');
+  await advanceNamingDay(10);
+
+  await walkAndWait('stadium-office', '!document.querySelector("[data-story-scene]").hidden');
+  await click('[data-story-action="write-conditions"]');
+  assert(await evaluate('Boolean(document.querySelector("[data-object=free-shop]"))'), 'Free-time choices did not appear after the five conditions');
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 2,
+    mobile: true
+  });
+  await sleep(250);
+  assert(!await evaluate('document.documentElement.scrollWidth > innerWidth'), 'The naming-rights world overflows on mobile');
+  await capture('naming-sign-mobile');
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 1440,
+    height: 900,
+    deviceScaleFactor: 1,
+    mobile: false
+  });
+  await completeNamingFreeAction('free-shop');
+  await advanceNamingDay(11);
+
+  await walkAndWait('pitch-prep', '!document.querySelector("[data-story-scene]").hidden');
+  await click('[data-story-action="open-free-time"]');
+  await completeNamingFreeAction('free-community');
+  await advanceNamingDay(12);
+
+  await walkAndWait('stadium-office', '!document.querySelector("[data-story-scene]").hidden');
+  assert((await text('[data-story-prop-caption]')).includes('刮掉'), 'The scratched founder plaque is missing');
+  await click('[data-story-action="acknowledge-history"]');
+  assert(await evaluate('Boolean(document.querySelector("[data-object=free-archive]"))'), 'The archive did not unlock after the founder plaque');
+  await completeNamingFreeAction('free-shop');
+  await advanceNamingDay(13);
+
+  await walkAndWait('match-center', '!document.querySelector("[data-story-scene]").hidden');
+  assert(!await evaluate('[...document.querySelectorAll("[data-story-action]")].find(element => element.dataset.storyAction === "naming-vote:community-save").disabled'), 'Community self-rescue did not unlock');
+  await click('[data-story-action="naming-vote:community-save"]');
+  await advanceNamingDay(14);
+
+  await walkAndWait('stadium-office', '!document.querySelector("[data-story-scene]").hidden');
+  await click('[data-story-action="naming-response:restore-history"]');
+  await completeNamingFreeAction('free-archive');
+  await advanceNamingDay(15);
+
+  await walkAndWait('match-center', '!document.querySelector("[data-story-scene]").hidden');
+  await click('[data-story-action="start-naming-match"]');
+  assert((await text('[data-match-home]')) === '海风球场', 'The second match does not use the voted stadium name');
+  for (const choiceId of ['keep-gates-open', 'steady-everyone', 'let-name-show']) {
+    await click(`[data-highlight-choice="${choiceId}"]`);
+  }
+  await waitFor('window.__integratedDayDebug.getState().namingRights.weekComplete', 'The naming-rights week did not settle');
+  await assertInsideViewport('[data-week-summary]');
+  assert((await text('[data-final-stadium-name]')) === '海风球场', 'The final sign has the wrong stadium name');
+  assert((await text('[data-final-authority]')).includes('五把椅子'), 'The final sign does not preserve the voted authority');
+  assert((await text('[data-week-next-crisis]')).includes('强队邀请费'), 'The continuation hook is missing');
+  await capture('naming-final');
+
+  await click('[data-begin-season]');
+  await waitFor('window.__integratedDayDebug.getState().season.active && window.__integratedDayDebug.getState().dayIndex === 17', 'The Haifeng league did not begin');
+  await capture('stadium-sign-revealed');
+  assert(!await evaluate('document.querySelector("[data-season-docket]").hidden'), 'The persistent league docket is missing');
+  assert((await text('[data-season-actions]')) === '行动 0 / 3', 'The first league round does not start with three open actions');
+  assert(await evaluate('document.querySelectorAll("[data-construction-project]").length === 4'), 'The stadium does not show its four construction regions');
+  assert(await evaluate('[...document.querySelectorAll("[data-construction-project]")].every(element => element.dataset.level === "0")'), 'A new league does not begin with visible unbuilt construction regions');
+
+  await walkAndWait('npc-lin-chuan', '!document.querySelector("[data-season-conversation]").hidden');
+  assert((await text('[data-season-npc-name]')) === '林川', 'The recurring NPC conversation opened the wrong person');
+  await click('[data-season-response="solve"]');
+  assert(await evaluate('window.__integratedDayDebug.getState().season.relationships["lin-chuan"] === 1'), 'The NPC response did not create a persistent bond');
+  await click('[data-season-conversation-close]');
+
+  await click('[data-season-board-open]');
+  await assertInsideViewport('[data-season-board]');
+  assert(await evaluate('document.querySelectorAll(".season-standing-row").length === 8'), 'The league board does not show all eight teams');
+  assert(await evaluate('document.querySelectorAll(".season-projects > div").length === 5'), 'The construction board does not show all five projects');
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 2,
+    mobile: true
+  });
+  await sleep(250);
+  assert(!await evaluate('document.documentElement.scrollWidth > innerWidth'), 'The league board overflows on mobile');
+  await assertInsideViewport('[data-season-board]');
+  await capture('league-board-mobile');
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 1440,
+    height: 900,
+    deviceScaleFactor: 1,
+    mobile: false
+  });
+  await click('[data-season-board-close]');
+
+  await walkAndWait('season-action-attack', '!document.querySelector("[data-decision-panel]").hidden');
+  await click('[data-decision-choice="train-attack"]');
+  await walkAndWait('season-action-community', '!document.querySelector("[data-decision-panel]").hidden');
+  await click('[data-decision-choice="community-open"]');
+  await walkAndWait('season-project-stands', '!document.querySelector("[data-decision-panel]").hidden');
+  await click('[data-decision-choice="stands"]');
+  assert(await evaluate('window.__integratedDayDebug.getState().season.projects.stands === 1'), 'The first permanent stand upgrade was not built');
+  assert(await evaluate('document.querySelector("[data-construction-project=stands]").dataset.level === "1"'), 'The stand construction layer did not change immediately after building');
+  assert(await evaluate('Boolean(document.querySelector("[data-object=season-project-stands]"))'), 'The built stand disappeared from the physical world');
+  assert(await evaluate('document.querySelector("[data-object=npc-lin-chuan]").style.getPropertyValue("--x") === "25%"'), 'Lin Chuan did not move beside the built stand');
+  const beforeFacilityVisit = await evaluate('({ minute: window.__integratedDayDebug.getState().minute, actions: window.__integratedDayDebug.getState().season.week.actions.length, bond: window.__integratedDayDebug.getState().season.relationships["lin-chuan"] })');
+  await walkAndWait('season-project-stands', '!document.querySelector("[data-decision-panel]").hidden');
+  assert(await evaluate('Boolean(document.querySelector("[data-decision-choice=\\"visit:stands\\"]"))'), 'The built stand does not offer a free facility visit');
+  await click('[data-decision-choice="visit:stands"]');
+  assert(await evaluate(`(() => {
+    const state = window.__integratedDayDebug.getState();
+    return state.minute === ${beforeFacilityVisit.minute + 12}
+      && state.season.week.actions.length === ${beforeFacilityVisit.actions}
+      && state.season.relationships['lin-chuan'] === ${beforeFacilityVisit.bond + 1}
+      && state.season.week.visitedProjectIds.includes('stands');
+  })()`), 'The free stand visit spent the wrong resource or failed to strengthen the relationship');
+  assert((await text('[data-season-actions]')) === '行动 3 / 3', 'The weekly action counter did not fill');
+
+  assert(!await evaluate('Boolean(document.querySelector("[data-object=season-match-center]"))'), 'The match opened before the round incident was answered');
+  await walkAndWait('to-training', 'window.__integratedDayDebug.getMapId() === "training"');
+  await walkAndWait('season-event-shared-pitch', '!document.querySelector("[data-season-event]").hidden');
+  assert((await text('[data-season-event-title]')) === '谁先用半块场地', 'The first authored incident did not open');
+  assert(await evaluate('document.querySelectorAll("[data-season-event-choice]").length === 3'), 'The incident does not offer three distinct decisions');
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 2,
+    mobile: true
+  });
+  await sleep(250);
+  assert(!await evaluate('document.documentElement.scrollWidth > innerWidth'), 'The league incident overflows on mobile');
+  await assertInsideViewport('[data-season-event]');
+  await capture('league-incident-mobile');
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 1440,
+    height: 900,
+    deviceScaleFactor: 1,
+    mobile: false
+  });
+  await click('[data-season-event-choice="share-half"]');
+  assert(await evaluate('window.__integratedDayDebug.getState().season.week.eventChoiceId === "share-half"'), 'The incident decision was not saved');
+  assert(await evaluate('window.__integratedDayDebug.getState().season.week.actions.length === 3'), 'The incident incorrectly spent a weekly action');
+  assert((await text('[data-season-incident-status]')).includes('已回应'), 'The league docket did not remember the incident');
+  assert(!await evaluate('document.querySelector("[data-season-event-result]").hidden'), 'The incident consequence was not shown');
+  await click('[data-season-event-close]');
+
+  await walkAndWait('npc-xiaoman', '!document.querySelector("[data-season-conversation]").hidden');
+  assert((await text('[data-season-npc-copy]')).includes('那道白线'), 'Xiaoman did not react to the shared-pitch decision');
+  assert((await text('[data-season-memory-source]')).includes('回应刚刚的决定'), 'The incident reaction has no current-decision source');
+  assert((await text('[data-season-memory-choice]')) === '把半块场地画出来', 'The NPC remembered the wrong incident choice');
+  assert(!await evaluate('document.querySelector("[data-season-memory]").hidden'), 'The incident follow-up action is missing');
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 2,
+    mobile: true
+  });
+  await sleep(250);
+  assert(!await evaluate('document.documentElement.scrollWidth > innerWidth'), 'The NPC memory conversation overflows on mobile');
+  await assertInsideViewport('[data-season-conversation]');
+  await capture('league-npc-memory-mobile');
+  await click('[data-season-memory-talk]');
+  assert(await evaluate('window.__integratedDayDebug.getState().season.relationships.xiaoman === 2'), 'The incident follow-up did not strengthen Xiaoman bond');
+  assert(await evaluate('window.__integratedDayDebug.getState().season.week.actions.length === 3'), 'The incident follow-up incorrectly spent a weekly action');
+  assert(await evaluate('window.__integratedDayDebug.getState().season.week.memoryNpcIds.includes("xiaoman")'), 'The incident follow-up was not saved');
+  assert((await text('[data-season-memory-talk]')) === '本轮已谈清楚', 'The incident follow-up did not enter its completed state');
+  await click('[data-season-conversation-close]');
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 1440,
+    height: 900,
+    deviceScaleFactor: 1,
+    mobile: false
+  });
+
+  await click('[data-season-board-open]');
+  assert(await evaluate('document.querySelectorAll(".season-history > div").length === 1'), 'The season handbook did not record the incident');
+  await click('[data-season-board-close]');
+  await walkAndWait('to-stadium', 'window.__integratedDayDebug.getMapId() === "stadium"');
+
+  await walkAndWait('season-match-center', '!document.querySelector("[data-match-panel]").hidden');
+  await click('[data-highlight-choice="use-attack-work"]');
+  const secondMoment = await evaluate(`({
+    choices: [...document.querySelectorAll('[data-highlight-choice]')].map(button => button.dataset.highlightChoice),
+    match: window.__integratedDayDebug.getState().season.match,
+    panelHidden: document.querySelector('[data-match-panel]').hidden
+  })`);
+  assert(secondMoment.choices.includes('open-safe-stands'), `The second league moment did not render: ${JSON.stringify(secondMoment)}`);
+  await click('[data-highlight-choice="open-safe-stands"]');
+  await click('[data-highlight-choice="share-final-ball"]');
+  await waitFor('window.__integratedDayDebug.getState().season.week.roundComplete', 'The first league match did not settle');
+  await assertInsideViewport('[data-season-summary]');
+  assert((await text('[data-season-summary-rank]')).includes('当前第'), 'The round summary does not show the live rank');
+  assert((await text('[data-season-summary-event]')).includes('谁先用半块场地'), 'The round summary forgot the authored incident');
+  await capture('league-round-summary');
+  await click('[data-season-next]');
+  await waitFor('window.__integratedDayDebug.getState().season.roundIndex === 1', 'The second league round did not open');
+  assert(await evaluate('window.__integratedDayDebug.getState().season.projects.stands === 1'), 'Construction did not persist into the next round');
+  assert(await evaluate('window.__integratedDayDebug.getState().season.relationships["lin-chuan"] === 2'), 'Construction and NPC bonds did not persist into the next round');
+  assert(await evaluate('window.__integratedDayDebug.getState().season.relationships.xiaoman === 2'), 'The incident follow-up bond did not persist into the next round');
+  await walkAndWait('to-training', 'window.__integratedDayDebug.getMapId() === "training"');
+  await walkAndWait('npc-xiaoman', '!document.querySelector("[data-season-conversation]").hidden');
+  assert((await text('[data-season-memory-source]')).includes('还记得第 1 轮'), 'The previous incident disappeared before the next decision');
+  assert((await text('[data-season-npc-copy]')).includes('那道白线'), 'Xiaoman forgot the previous incident in the next round');
+  await click('[data-season-conversation-close]');
+
+  await loadLivingConstructionFixture();
+  const construction = await evaluate(`({
+    levels: Object.fromEntries([...document.querySelectorAll('[data-construction-project]')].map(element => [element.dataset.constructionProject, Number(element.dataset.level)])),
+    labels: [...document.querySelectorAll('[data-construction-project]')].map(element => element.textContent.trim()),
+    auntMap: Boolean(document.querySelector('[data-object="npc-aunt-xu"]')),
+    xiaomanMap: Boolean(document.querySelector('[data-object="npc-xiaoman"]')),
+    maxTarget: Boolean(document.querySelector('[data-object="season-project-stands"]')),
+    overflow: document.documentElement.scrollWidth > innerWidth
+  })`);
+  assert(JSON.stringify(construction.levels) === JSON.stringify({ stands: 3, clinic: 2, market: 2, lights: 0 }), `Mixed stadium construction levels are wrong: ${JSON.stringify(construction)}`);
+  assert(construction.labels.some(label => label.includes('家庭看台')) && construction.labels.some(label => label.includes('待开工')), 'Construction layers do not name complete and unbuilt stages');
+  assert(construction.auntMap && construction.xiaomanMap, 'Built facilities did not bring Aunt Xu and Xiaoman into the stadium');
+  assert(construction.maxTarget, 'A max-level facility cannot be revisited');
+  assert(!construction.overflow, 'Mixed construction world overflows on desktop');
+  await capture('construction-desktop');
+
+  const outlookEight = await evaluate(`({
+    present: Boolean(document.querySelector('[data-match-outlook]')),
+    deficit: (document.querySelector('[data-outlook-deficit]') || {}).textContent || '',
+    summary: (document.querySelector('[data-outlook-summary]') || {}).textContent || '',
+    levels: (document.querySelector('[data-outlook-construction]') || {}).textContent || ''
+  })`);
+  assert(outlookEight.present, 'The match outlook block is missing during a league round');
+  assert(outlookEight.levels.includes('8'), `The outlook does not report the current eight construction levels: ${JSON.stringify(outlookEight)}`);
+  assert(outlookEight.summary.trim().length > 0, 'The outlook shows no readable situation summary');
+
+  const outlookShift = await evaluate(`(() => {
+    const read = () => ({
+      deficit: document.querySelector('[data-outlook-deficit]').textContent,
+      edge: document.querySelector('[data-outlook-edge]').textContent,
+      levels: document.querySelector('[data-outlook-construction]').textContent,
+      summary: document.querySelector('[data-outlook-summary]').textContent
+    });
+    const debug = window.__integratedDayDebug;
+    debug.setSeasonProjects({ stands: 1, clinic: 1, academy: 0, market: 0, lights: 0 });
+    const low = read();
+    debug.setSeasonProjects({ stands: 3, clinic: 3, academy: 3, market: 3, lights: 3 });
+    const high = read();
+    debug.setSeasonProjects({ stands: 3, clinic: 2, academy: 1, market: 2, lights: 0 });
+    return { low, high };
+  })()`);
+  assert(outlookShift.low.levels.includes('2') && outlookShift.high.levels.includes('15'), `The outlook does not follow construction levels: ${JSON.stringify(outlookShift)}`);
+  assert(outlookShift.low.edge !== outlookShift.high.edge, `Construction must visibly change the strength edge: ${JSON.stringify(outlookShift)}`);
+  assert(outlookShift.low.levels.includes('还差'), `A partial build must show the distance to the next milestone: ${JSON.stringify(outlookShift)}`);
+  assert(outlookShift.high.levels.includes('已建成'), `A finished stadium must report itself as complete: ${JSON.stringify(outlookShift)}`);
+  assert(outlookShift.low.summary !== outlookShift.high.summary, `The milestone summary must change with construction: ${JSON.stringify(outlookShift)}`);
+
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 2,
+    mobile: true
+  });
+  await sleep(250);
+  assert(!await evaluate('document.documentElement.scrollWidth > innerWidth'), 'The living construction world overflows on mobile');
+  await assertInsideViewport('[data-match-outlook]');
+  await capture('construction-mobile');
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 1440,
+    height: 900,
+    deviceScaleFactor: 1,
+    mobile: false
+  });
+
+  await loadUnqualifiedSeasonFixture();
+  assert(!(await text('[data-season-summary-title]')).includes('精英邀请赛资格'), 'An unqualified season incorrectly received an elite invitation');
+  assert((await text('[data-season-next]')) === '带着这些进入下一赛季', 'An unqualified season cannot continue building next season');
+  await click('[data-season-next]');
+  await waitFor('window.__integratedDayDebug.getState().season.seasonNumber === 2', 'The unqualified route did not open another season');
+
+  const eliteBefore = await loadQualifiedEliteFixture();
+  assert((await text('[data-season-summary-title]')).includes('精英邀请赛资格'), 'The qualified season summary does not announce the invitation');
+  assert((await text('[data-season-next]')) === '接受精英邀请', 'The qualified season does not offer a playable elite finale');
+  await click('[data-season-next]');
+  await waitFor('!document.querySelector("[data-elite-panel]").hidden', 'The elite invitation panel did not open');
+  assert((await text('[data-elite-opponent]')) === '鹤岭青训联队', 'The elite invitation opened the wrong opponent');
+  assert(await evaluate('document.querySelectorAll("[data-elite-preparation]").length === 3'), 'The elite invitation does not offer three preparation routes');
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 2,
+    mobile: true
+  });
+  await sleep(250);
+  assert(!await evaluate('document.documentElement.scrollWidth > innerWidth'), 'The elite invitation overflows on mobile');
+  await assertInsideViewport('[data-elite-panel]');
+  await capture('elite-invitation-mobile');
+  await click('[data-elite-preparation="shared-plan"]');
+  assert(await evaluate('window.__integratedDayDebug.getState().season.elite.status === "match"'), 'The elite preparation did not start the match');
+  assert((await text('[data-elite-score]')) === '0 : 2', 'The elite match did not begin from its authored deficit');
+  for (const choiceId of ['use-league-shape', 'open-built-route', 'follow-shared-plan']) {
+    await click(`[data-elite-choice="${choiceId}"]`);
+  }
+  assert(await evaluate('window.__integratedDayDebug.getState().season.elite.result.id === "champion"'), 'The fully prepared elite route did not win');
+  assert((await text('[data-elite-score]')) === '2 : 1', 'The elite final score is not visible');
+  assert(await evaluate(`window.__integratedDayDebug.getState().economy.cash === ${eliteBefore.cash + 160}`), 'The elite prize was not paid');
+  assert(await evaluate(`window.__integratedDayDebug.getState().roster.cohesion === ${Math.min(100, eliteBefore.cohesion + 4)}`), 'The elite cohesion reward was not applied');
+  assert(await evaluate(`window.__integratedDayDebug.getState().communitySupport === ${Math.min(100, eliteBefore.community + 8)}`), 'The elite community reward was not applied');
+  assert((await text('[data-elite-result-title]')) === '击败精英队', 'The elite result does not show the permanent outcome');
+  await click('[data-elite-next]');
+  await waitFor('window.__integratedDayDebug.getState().season.seasonNumber === 2', 'The elite finale did not open the next season');
+  assert(await evaluate('window.__integratedDayDebug.getState().season.elite.bestResultId === "champion"'), 'The elite best result did not persist');
+}
+
+async function testStorageBlocked() {
+  await evaluate(`(() => {
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem() { throw new Error('SecurityError: local storage is blocked'); },
+        setItem() { throw new Error('SecurityError'); },
+        removeItem() { throw new Error('SecurityError'); }
+      }
+    });
+    return true;
+  })()`);
+  const fromMap = await evaluate('window.__integratedDayDebug.getMapId()');
+  const exitId = fromMap === 'training' ? 'to-stadium' : 'to-training';
+  const targetMap = fromMap === 'training' ? 'stadium' : 'training';
+  await walkAndWait(exitId, `window.__integratedDayDebug.getMapId() === '${targetMap}'`);
+  await waitFor(
+    `(() => { const w = document.querySelector('[data-storage-warning]'); return w && !w.hidden && w.textContent.includes('不会被保存'); })()`,
+    'A blocked save did not show the persistent warning while play continued',
+    12000
+  );
+  assert(await evaluate('Boolean(window.__integratedDayDebug)'), 'The game became unusable after storage writes failed');
 }
 
 let exitCode = 0;
@@ -565,6 +1057,12 @@ try {
   console.log('PASS blank notice, Shen reversal, and five-chair hearing');
   console.log('PASS three active promise activities');
   console.log('PASS deterministic callback match and character settlement');
+  console.log('PASS naming-rights week, free-time loop, public vote, and sign reveal');
+  console.log('PASS repeatable league round, authored incident, remembered NPC response, construction, match, and standings');
+  console.log('PASS visible construction stages, facility visits, and NPC relocation');
+  console.log('PASS qualified elite invitation, preparation callbacks, permanent result, and next season');
+  await testStorageBlocked();
+  console.log('PASS blocked storage keeps the game playable and warns once');
   assert(pageErrors.length === 0, `Browser errors: ${pageErrors.join(' | ')}`);
   console.log('PASS browser console');
 } catch (error) {

@@ -1,0 +1,1651 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>安若童的休息日 - 核心循环原型</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --ink: #15201d;
+      --muted: #52635e;
+      --paper: #eef1e9;
+      --surface: rgba(244, 246, 239, 0.94);
+      --surface-solid: #f4f6ef;
+      --line: rgba(21, 32, 29, 0.16);
+      --field: #4f6d45;
+      --accent: #c86052;
+      --accent-dark: #873c34;
+      --shadow: rgba(27, 43, 37, 0.25);
+      --radius: 14px;
+      --ease: cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --ink: #e9eee8;
+        --muted: #aab8b1;
+        --paper: #17201e;
+        --surface: rgba(28, 39, 35, 0.94);
+        --surface-solid: #1c2723;
+        --line: rgba(233, 238, 232, 0.16);
+        --shadow: rgba(0, 0, 0, 0.38);
+      }
+    }
+
+    * { box-sizing: border-box; }
+
+    [hidden] { display: none !important; }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: #101715;
+      font-family: "SF Pro Rounded", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      color: var(--ink);
+    }
+
+    button { font: inherit; }
+
+    button:focus-visible {
+      outline: 3px solid rgba(200, 96, 82, 0.62);
+      outline-offset: 3px;
+    }
+
+    #stage { min-height: 100dvh; }
+
+    .prototype {
+      min-height: 100dvh;
+      padding: 18px 18px 82px;
+      background:
+        radial-gradient(circle at 14% 10%, rgba(109, 140, 109, 0.22), transparent 38%),
+        #15201d;
+      animation: stage-in 260ms var(--ease) both;
+    }
+
+    .game-layout {
+      width: min(1440px, 100%);
+      min-height: calc(100dvh - 100px);
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 318px;
+      gap: 14px;
+    }
+
+    .scene-column {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .topbar,
+    .side-panel,
+    .dialogue,
+    .shop-counter,
+    .day-summary {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: 0 16px 44px var(--shadow);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+
+    .topbar {
+      min-height: 58px;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+    }
+
+    .identity { min-width: 0; }
+
+    .identity strong {
+      display: block;
+      font-size: 15px;
+      letter-spacing: 0.01em;
+    }
+
+    .identity span {
+      display: block;
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .day-stats {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex: 0 0 auto;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .stat { text-align: right; }
+
+    .stat-label {
+      display: block;
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1.2;
+    }
+
+    .stat-value {
+      display: block;
+      margin-top: 2px;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 760;
+    }
+
+    .scene {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      min-height: 360px;
+      overflow: hidden;
+      border-radius: var(--radius);
+      background: #506343;
+      box-shadow: 0 18px 52px rgba(0, 0, 0, 0.31);
+      isolation: isolate;
+    }
+
+    .scene::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      pointer-events: none;
+      background:
+        linear-gradient(to bottom, rgba(19, 30, 26, 0.02), transparent 62%, rgba(19, 30, 26, 0.18)),
+        radial-gradient(circle at 50% 44%, transparent 46%, rgba(13, 23, 19, 0.12));
+    }
+
+    .scene-bg {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      image-rendering: auto;
+      user-select: none;
+      pointer-events: none;
+    }
+
+    .scene-wash {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      background: rgba(56, 75, 57, 0.04);
+      pointer-events: none;
+    }
+
+    .side-panel {
+      align-self: stretch;
+      padding: 22px;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    .side-panel h1,
+    .side-panel h2 {
+      margin: 0;
+      font-size: clamp(24px, 2.3vw, 34px);
+      line-height: 1.06;
+      letter-spacing: -0.04em;
+    }
+
+    .side-panel h2 { font-size: 22px; }
+
+    .side-panel > p {
+      margin: 12px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.65;
+    }
+
+    .rule {
+      height: 1px;
+      margin: 20px 0;
+      background: var(--line);
+    }
+
+    .objective-list {
+      display: grid;
+      gap: 11px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .objective {
+      display: grid;
+      grid-template-columns: 18px 1fr;
+      gap: 9px;
+      align-items: start;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .objective::before {
+      content: "";
+      width: 14px;
+      height: 14px;
+      margin-top: 2px;
+      border: 1.5px solid currentColor;
+      border-radius: 4px;
+    }
+
+    .objective.done {
+      color: var(--ink);
+      text-decoration: line-through;
+      text-decoration-color: rgba(200, 96, 82, 0.55);
+    }
+
+    .objective.done::before {
+      border-color: var(--accent);
+      background: var(--accent);
+      box-shadow: inset 0 0 0 3px var(--surface-solid);
+    }
+
+    .hint-box {
+      margin-top: auto;
+      padding-top: 20px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .key {
+      display: inline-flex;
+      min-width: 25px;
+      height: 24px;
+      align-items: center;
+      justify-content: center;
+      margin: 0 2px;
+      padding: 0 7px;
+      border: 1px solid var(--line);
+      border-bottom-width: 2px;
+      border-radius: 6px;
+      background: var(--surface-solid);
+      color: var(--ink);
+      font-weight: 720;
+    }
+
+    .world-object,
+    .npc-marker {
+      position: absolute;
+      z-index: 4;
+      transform: translate(-50%, -50%);
+      border: 0;
+      background: transparent;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .world-object:active,
+    .npc-marker:active { transform: translate(-50%, -50%) scale(0.96); }
+
+    .world-object .object-shape {
+      display: block;
+      position: relative;
+      width: 28px;
+      height: 24px;
+      filter: drop-shadow(0 3px 2px rgba(18, 29, 24, 0.34));
+    }
+
+    .object-shape.weeds::before,
+    .object-shape.weeds::after {
+      content: "";
+      position: absolute;
+      bottom: 1px;
+      left: 7px;
+      width: 5px;
+      height: 20px;
+      border-radius: 80% 0 80% 0;
+      background: #b8c969;
+      transform: rotate(-26deg);
+      box-shadow: 7px -2px 0 #8eae55, 12px 3px 0 #d2d97b;
+    }
+
+    .object-shape.weeds::after {
+      left: 13px;
+      transform: scaleX(-1) rotate(-20deg);
+    }
+
+    .object-shape.boards::before {
+      content: "";
+      position: absolute;
+      inset: 6px 1px 3px;
+      border-radius: 3px;
+      background: #a66d48;
+      box-shadow: 2px -6px 0 #c18559, -2px 5px 0 #754d39;
+      transform: rotate(-7deg);
+    }
+
+    .object-shape.bench::before {
+      content: "";
+      position: absolute;
+      inset: 7px 0 6px;
+      border-radius: 2px;
+      background: #82604a;
+      box-shadow: 0 -5px 0 #9d7453, 4px 7px 0 -2px #4e463d, -4px 7px 0 -2px #4e463d;
+      transform: rotate(4deg);
+    }
+
+    .object-shape.bench.repaired::before {
+      background: #bd7a57;
+      box-shadow: 0 -5px 0 #d48d65, 4px 7px 0 -2px #4e463d, -4px 7px 0 -2px #4e463d;
+      transform: none;
+    }
+
+    .object-shape.door::before {
+      content: "";
+      position: absolute;
+      inset: 0 4px;
+      border: 3px solid #e1d7b9;
+      border-bottom: 0;
+      background: #54656d;
+      box-shadow: inset -3px 0 rgba(28, 39, 35, 0.3);
+    }
+
+    .sprite {
+      position: absolute;
+      z-index: 5;
+      width: 24px;
+      height: 32px;
+      transform: translate(-50%, -50%);
+      filter: drop-shadow(0 4px 2px rgba(13, 23, 19, 0.36));
+      pointer-events: none;
+    }
+
+    .sprite::before {
+      content: "";
+      position: absolute;
+      top: 1px;
+      left: 7px;
+      width: 11px;
+      height: 10px;
+      border-radius: 4px 4px 3px 3px;
+      background: #d8aa81;
+      box-shadow: inset 0 3px #3a302b;
+    }
+
+    .sprite::after {
+      content: "";
+      position: absolute;
+      top: 11px;
+      left: 5px;
+      width: 14px;
+      height: 14px;
+      border-radius: 3px 3px 2px 2px;
+      background: var(--shirt, #c86052);
+      box-shadow: -3px 2px var(--shirt, #c86052), 3px 2px var(--shirt, #c86052), -2px 13px #33453f, 5px 13px #33453f;
+    }
+
+    .sprite.player { transition: filter 140ms ease-out; }
+
+    .sprite.player.moving { filter: drop-shadow(0 5px 2px rgba(13, 23, 19, 0.28)); }
+
+    .npc-marker {
+      width: 58px;
+      height: 64px;
+      color: #f6f1e4;
+    }
+
+    .npc-marker .sprite {
+      left: 50%;
+      top: 22px;
+    }
+
+    .npc-marker .nameplate {
+      position: absolute;
+      left: 50%;
+      bottom: 0;
+      transform: translateX(-50%);
+      padding: 3px 7px;
+      border-radius: 6px;
+      background: rgba(17, 27, 23, 0.84);
+      color: #f3f4ee;
+      font-size: 10px;
+      white-space: nowrap;
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.22);
+    }
+
+    .npc-marker.done .nameplate { background: rgba(61, 96, 72, 0.94); }
+
+    .npc-marker.done::after {
+      content: "完成";
+      position: absolute;
+      top: -8px;
+      right: -5px;
+      padding: 2px 5px;
+      border-radius: 5px;
+      background: #e7eee3;
+      color: #294534;
+      font-size: 9px;
+      font-weight: 760;
+    }
+
+    .interaction-prompt {
+      position: absolute;
+      left: 50%;
+      bottom: 18px;
+      z-index: 8;
+      transform: translateX(-50%);
+      max-width: calc(100% - 32px);
+      padding: 9px 13px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 10px;
+      background: rgba(15, 24, 21, 0.88);
+      color: #f3f4ee;
+      box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+      font-size: 12px;
+      text-align: center;
+      pointer-events: none;
+    }
+
+    .toast {
+      position: absolute;
+      top: 18px;
+      left: 50%;
+      z-index: 9;
+      transform: translateX(-50%);
+      max-width: calc(100% - 30px);
+      padding: 10px 14px;
+      border-radius: 10px;
+      background: rgba(244, 246, 239, 0.94);
+      color: #20302a;
+      box-shadow: 0 12px 30px rgba(12, 21, 17, 0.28);
+      font-size: 12px;
+      line-height: 1.45;
+      animation: toast-in 220ms var(--ease) both;
+    }
+
+    .bag {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .bag-item {
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: color-mix(in srgb, var(--surface-solid), transparent 10%);
+      font-size: 12px;
+    }
+
+    .bag-item strong {
+      display: block;
+      margin-top: 3px;
+      font-size: 17px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .mobile-controls {
+      display: none;
+      grid-template-columns: repeat(3, 46px);
+      grid-template-rows: repeat(2, 42px);
+      gap: 5px;
+      position: absolute;
+      z-index: 10;
+      left: 14px;
+      bottom: 14px;
+    }
+
+    .control-button {
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 9px;
+      background: rgba(15, 24, 21, 0.82);
+      color: #f3f4ee;
+      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+      font-weight: 760;
+    }
+
+    .control-button:active { transform: scale(0.96); }
+    .control-up { grid-column: 2; }
+    .control-left { grid-column: 1; grid-row: 2; }
+    .control-down { grid-column: 2; grid-row: 2; }
+    .control-right { grid-column: 3; grid-row: 2; }
+
+    .action-button-mobile {
+      display: none;
+      position: absolute;
+      right: 16px;
+      bottom: 18px;
+      z-index: 10;
+      width: 58px;
+      height: 58px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 50%;
+      background: rgba(200, 96, 82, 0.92);
+      color: #fff;
+      box-shadow: 0 9px 22px rgba(75, 37, 32, 0.32);
+      font-weight: 800;
+    }
+
+    .dialogue {
+      position: absolute;
+      left: 50%;
+      bottom: 18px;
+      z-index: 11;
+      width: min(560px, calc(100% - 28px));
+      padding: 18px;
+      transform: translateX(-50%);
+      animation: dialogue-in 220ms var(--ease) both;
+    }
+
+    .dialogue h3 {
+      margin: 0 0 7px;
+      font-size: 16px;
+    }
+
+    .dialogue p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .dialogue-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 15px;
+    }
+
+    .primary-button,
+    .secondary-button {
+      min-height: 38px;
+      padding: 0 14px;
+      border-radius: 9px;
+      cursor: pointer;
+      transition: transform 140ms ease-out, background 140ms ease-out;
+      white-space: nowrap;
+    }
+
+    .primary-button {
+      border: 1px solid var(--accent-dark);
+      background: var(--accent);
+      color: #fff;
+      font-weight: 720;
+    }
+
+    .secondary-button {
+      border: 1px solid var(--line);
+      background: var(--surface-solid);
+      color: var(--ink);
+    }
+
+    .primary-button:hover { background: var(--accent-dark); }
+    .primary-button:active,
+    .secondary-button:active { transform: scale(0.98); }
+
+    .primary-button:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+    }
+
+    .time-blocks {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 7px;
+      margin-top: 15px;
+    }
+
+    .time-block {
+      height: 8px;
+      border-radius: 4px;
+      background: var(--accent);
+    }
+
+    .time-block.used { background: var(--line); }
+
+    .people-list {
+      display: grid;
+      gap: 8px;
+      margin-top: 18px;
+    }
+
+    .person-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 9px 0;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .person-row:last-child { border-bottom: 0; }
+    .person-row.done { color: var(--ink); }
+
+    .person-status {
+      flex: 0 0 auto;
+      font-size: 11px;
+      font-weight: 720;
+    }
+
+    .shop-scene .scene-bg { filter: saturate(0.9) brightness(0.84); }
+
+    .shop-counter {
+      position: absolute;
+      z-index: 5;
+      right: 3.5%;
+      bottom: 4%;
+      width: min(420px, 46%);
+      padding: 18px;
+      background: rgba(244, 246, 239, 0.96);
+      color: #18231f;
+    }
+
+    .shop-counter h2 {
+      margin: 0;
+      font-size: 18px;
+      letter-spacing: -0.02em;
+    }
+
+    .order-line {
+      margin-top: 8px;
+      color: #54635d;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .recipe-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .recipe-button {
+      min-height: 86px;
+      padding: 10px 7px;
+      border: 1px solid rgba(24, 35, 31, 0.16);
+      border-radius: 9px;
+      background: #e9eee5;
+      color: #1d2b26;
+      cursor: pointer;
+      transition: transform 140ms ease-out, background 140ms ease-out;
+    }
+
+    .recipe-button:hover { background: #dfe8db; }
+    .recipe-button:active { transform: scale(0.97); }
+
+    .recipe-shape {
+      display: block;
+      width: 28px;
+      height: 30px;
+      margin: 0 auto 8px;
+      border: 2px solid #465b51;
+      border-radius: 4px 4px 9px 9px;
+      background: #b7c88c;
+      box-shadow: inset 0 7px rgba(255, 255, 255, 0.26);
+    }
+
+    .recipe-button:nth-child(2) .recipe-shape { background: #c9876f; }
+    .recipe-button:nth-child(3) .recipe-shape {
+      height: 24px;
+      margin-top: 6px;
+      background: #e8e4d7;
+      border-radius: 3px;
+      box-shadow: 4px 4px #c8c4b9;
+    }
+
+    .recipe-name {
+      display: block;
+      font-size: 11px;
+      font-weight: 760;
+    }
+
+    .recipe-cost {
+      display: block;
+      margin-top: 3px;
+      color: #617069;
+      font-size: 9px;
+    }
+
+    .stock-line {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 12px;
+      margin-top: 13px;
+      color: #617069;
+      font-size: 10px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .customer-figure {
+      position: absolute;
+      z-index: 4;
+      right: 51%;
+      bottom: 16%;
+      width: 110px;
+      height: 90px;
+      animation: customer-in 240ms var(--ease) both;
+    }
+
+    .customer-figure .sprite { left: 50%; top: 28px; }
+
+    .speech {
+      position: absolute;
+      left: 50%;
+      bottom: 0;
+      transform: translateX(-50%);
+      width: 110px;
+      padding: 6px 8px;
+      border-radius: 7px;
+      background: rgba(244, 246, 239, 0.94);
+      color: #22302b;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.24);
+      font-size: 10px;
+      text-align: center;
+    }
+
+    .upgrade-list {
+      display: grid;
+      gap: 9px;
+      margin-top: 18px;
+    }
+
+    .upgrade-button {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: center;
+      width: 100%;
+      padding: 11px 12px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--surface-solid);
+      color: var(--ink);
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .upgrade-button:hover { border-color: rgba(200, 96, 82, 0.48); }
+    .upgrade-button:active { transform: scale(0.99); }
+    .upgrade-button:disabled { opacity: 0.42; cursor: not-allowed; }
+
+    .upgrade-button span { color: var(--muted); font-size: 11px; }
+
+    .day-summary {
+      position: absolute;
+      inset: 50% auto auto 50%;
+      z-index: 20;
+      width: min(440px, calc(100% - 28px));
+      padding: 24px;
+      transform: translate(-50%, -50%);
+      text-align: left;
+      animation: summary-in 260ms var(--ease) both;
+    }
+
+    .day-summary h2 {
+      margin: 0;
+      font-size: 28px;
+      line-height: 1.1;
+      letter-spacing: -0.04em;
+    }
+
+    .day-summary p {
+      margin: 12px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.65;
+    }
+
+    .summary-facts {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+      margin: 17px 0;
+    }
+
+    .summary-fact {
+      padding: 11px;
+      border-radius: 9px;
+      background: color-mix(in srgb, var(--surface-solid), var(--accent) 5%);
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .summary-fact strong {
+      display: block;
+      margin-top: 3px;
+      color: var(--ink);
+      font-size: 18px;
+    }
+
+    .scene-dim {
+      position: absolute;
+      inset: 0;
+      z-index: 18;
+      background: rgba(12, 20, 17, 0.58);
+      backdrop-filter: blur(3px);
+    }
+
+    .proto-picker {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 2147483647;
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      padding: 4px;
+      border-radius: 999px;
+      background: rgba(10, 10, 10, 0.82);
+      -webkit-backdrop-filter: blur(12px) saturate(1.4);
+      backdrop-filter: blur(12px) saturate(1.4);
+      box-shadow:
+        0 0 0 1px rgba(255, 255, 255, 0.08) inset,
+        0 8px 24px rgba(0, 0, 0, 0.24),
+        0 2px 6px rgba(0, 0, 0, 0.12);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 13px;
+      line-height: 1;
+      -webkit-font-smoothing: antialiased;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .proto-picker-highlight {
+      position: absolute;
+      top: 4px;
+      left: 0;
+      height: 28px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.12);
+      will-change: transform;
+    }
+
+    .proto-picker[data-ready] .proto-picker-highlight {
+      transition:
+        transform 250ms cubic-bezier(0.23, 1, 0.32, 1),
+        width 250ms cubic-bezier(0.23, 1, 0.32, 1);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .proto-picker[data-ready] .proto-picker-highlight { transition: none; }
+    }
+
+    .proto-picker-item {
+      position: relative;
+      display: flex;
+      align-items: center;
+      height: 28px;
+      padding: 0 12px;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: rgba(255, 255, 255, 0.55);
+      font: inherit;
+      cursor: pointer;
+      transition: color 150ms ease-out;
+    }
+
+    .proto-picker-item:hover { color: rgba(255, 255, 255, 0.85); }
+    .proto-picker-item:active { transform: scale(0.97); }
+
+    .proto-picker-item:focus-visible {
+      outline: 2px solid rgba(255, 255, 255, 0.4);
+      outline-offset: 2px;
+    }
+
+    .proto-picker-item[data-active] { color: #fff; }
+
+    .proto-picker-divider {
+      width: 1px;
+      height: 16px;
+      margin: 0 4px;
+      background: rgba(255, 255, 255, 0.12);
+    }
+
+    .proto-picker-replay {
+      padding: 0 10px;
+      font-size: 14px;
+    }
+
+    .proto-picker[data-position="top"] {
+      bottom: auto;
+      top: 24px;
+    }
+
+    @keyframes stage-in {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes toast-in {
+      from { opacity: 0; transform: translate(-50%, -8px); }
+      to { opacity: 1; transform: translate(-50%, 0); }
+    }
+
+    @keyframes dialogue-in {
+      from { opacity: 0; transform: translate(-50%, 12px); }
+      to { opacity: 1; transform: translate(-50%, 0); }
+    }
+
+    @keyframes customer-in {
+      from { opacity: 0; transform: translateX(-12px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+
+    @keyframes summary-in {
+      from { opacity: 0; transform: translate(-50%, calc(-50% + 12px)) scale(0.98); }
+      to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    }
+
+    @media (max-width: 920px) {
+      .prototype { padding: 10px 10px 82px; }
+
+      .game-layout {
+        min-height: auto;
+        grid-template-columns: 1fr;
+      }
+
+      .scene { min-height: 0; }
+      .side-panel { min-height: 260px; }
+      .hint-box { margin-top: 16px; }
+      .mobile-controls,
+      .action-button-mobile { display: grid; }
+
+      .shop-counter {
+        right: 2.5%;
+        bottom: 2.5%;
+        width: min(520px, 62%);
+        padding: 13px;
+      }
+
+      .customer-figure { right: 62%; }
+    }
+
+    @media (max-width: 620px) {
+      .prototype { padding: 0 0 82px; }
+
+      .topbar,
+      .scene,
+      .side-panel {
+        border-radius: 0;
+      }
+
+      .topbar {
+        min-height: 64px;
+        padding: 10px 12px;
+      }
+
+      .day-stats { gap: 9px; }
+      .stat:first-child { display: none; }
+      .scene { aspect-ratio: 1 / 1; }
+      .scene-bg { object-position: center; }
+      .side-panel { padding: 20px 16px; }
+      .npc-marker { transform: translate(-50%, -50%) scale(0.9); }
+
+      .shop-counter {
+        left: 10px;
+        right: 10px;
+        bottom: 10px;
+        width: auto;
+      }
+
+      .customer-figure {
+        right: 4%;
+        bottom: 68%;
+      }
+
+      .recipe-grid { gap: 6px; }
+      .recipe-button { min-height: 76px; padding: 8px 4px; }
+
+      .proto-picker {
+        bottom: 14px;
+        max-width: calc(100vw - 20px);
+      }
+
+      .proto-picker-item { padding: 0 9px; font-size: 11px; }
+      .proto-picker-replay { padding: 0 8px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        scroll-behavior: auto !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main id="stage" aria-live="polite"></main>
+
+  <nav class="proto-picker" aria-label="Prototype variants">
+    <span class="proto-picker-highlight" aria-hidden="true"></span>
+    <button class="proto-picker-item" data-active aria-current="true">自由的一天</button>
+    <button class="proto-picker-item">一起练习</button>
+    <button class="proto-picker-item">场边小店</button>
+    <span class="proto-picker-divider" aria-hidden="true"></span>
+    <button class="proto-picker-item proto-picker-replay" aria-label="Replay animation (R)">↻</button>
+  </nav>
+
+  <script>
+    const imagePath = './assets/community-field-concept.png';
+    let cleanupActive = () => {};
+
+    function topbar(subtitle, time, energyLabel, energy) {
+      return `
+        <header class="topbar">
+          <div class="identity">
+            <strong>安若童的休息日</strong>
+            <span>${subtitle}</span>
+          </div>
+          <div class="day-stats">
+            <div class="stat"><span class="stat-label">日期</span><span class="stat-value">春 12</span></div>
+            <div class="stat"><span class="stat-label">时间</span><span class="stat-value" data-time>${time}</span></div>
+            <div class="stat"><span class="stat-label">${energyLabel}</span><span class="stat-value" data-energy>${energy}</span></div>
+          </div>
+        </header>`;
+    }
+
+    function freeDayMarkup() {
+      return `
+        <article class="prototype" data-variant="free">
+          <div class="game-layout">
+            <section class="scene-column">
+              ${topbar('没有必须完成的事，先四处看看', '09:10', '体力', '100')}
+              <div class="scene" data-scene>
+                <img class="scene-bg" src="${imagePath}" alt="河边社区球场、旧看台和俱乐部小屋">
+                <div class="scene-wash"></div>
+
+                <button class="world-object" data-object="grass-a" style="left:18%;top:70%" aria-label="一丛长草"><span class="object-shape weeds"></span></button>
+                <button class="world-object" data-object="grass-b" style="left:29%;top:47%" aria-label="一丛长草"><span class="object-shape weeds"></span></button>
+                <button class="world-object" data-object="grass-c" style="left:77%;top:70%" aria-label="一丛长草"><span class="object-shape weeds"></span></button>
+                <button class="world-object" data-object="boards" style="left:83%;top:54%" aria-label="旧木板"><span class="object-shape boards"></span></button>
+                <button class="world-object" data-object="bench" style="left:65%;top:86%" aria-label="坏掉的长椅"><span class="object-shape bench"></span></button>
+                <button class="world-object" data-object="door" style="left:49%;top:22%" aria-label="俱乐部小屋门口"><span class="object-shape door"></span></button>
+
+                <button class="npc-marker" data-object="coach" style="left:60%;top:44%" aria-label="和郭教练交谈">
+                  <span class="sprite" style="--shirt:#536d76"></span>
+                  <span class="nameplate">郭教练</span>
+                </button>
+
+                <div class="sprite player" data-player style="--shirt:#c86052;left:50%;top:82%"></div>
+                <div class="interaction-prompt" data-prompt>用 W A S D 走近感兴趣的东西</div>
+
+                <div class="mobile-controls" aria-label="移动控制">
+                  <button class="control-button control-up" data-move="w">W</button>
+                  <button class="control-button control-left" data-move="a">A</button>
+                  <button class="control-button control-down" data-move="s">S</button>
+                  <button class="control-button control-right" data-move="d">D</button>
+                </div>
+                <button class="action-button-mobile" data-action>E</button>
+              </div>
+            </section>
+
+            <aside class="side-panel">
+              <h1>自由的一天</h1>
+              <p>最接近《星露谷物语》的探索循环。没有倒计时，走到哪里就做一点什么。</p>
+              <div class="rule"></div>
+              <ul class="objective-list">
+                <li class="objective" data-goal="meet">认识留在场上的人</li>
+                <li class="objective" data-goal="gather">找到能用的草绳和木板</li>
+                <li class="objective" data-goal="repair">把场边长椅修好</li>
+                <li class="objective" data-goal="home">天黑前回到俱乐部小屋</li>
+              </ul>
+              <div class="bag">
+                <div class="bag-item">草绳<strong data-fiber>0</strong></div>
+                <div class="bag-item">木板<strong data-wood>0</strong></div>
+              </div>
+              <div class="hint-box">
+                使用 <span class="key">W</span><span class="key">A</span><span class="key">S</span><span class="key">D</span> 移动，靠近后按 <span class="key">E</span>。也可以直接点击场景中的人物与物品。
+              </div>
+            </aside>
+          </div>
+        </article>`;
+    }
+
+    function togetherMarkup() {
+      const people = [
+        ['lin', '林川', 39, 51, '#bd695b'],
+        ['qiao', '乔可', 55, 67, '#697e8b'],
+        ['guo', '郭教练', 62, 39, '#4f6875'],
+        ['xu', '许姨', 26, 58, '#8a725c'],
+        ['deng', '邓叔', 75, 46, '#6a7b55']
+      ];
+      return `
+        <article class="prototype" data-variant="together">
+          <div class="game-layout">
+            <section class="scene-column">
+              ${topbar('只挑三件愿意参与的事', '14:00', '空闲', '3 段')}
+              <div class="scene" data-scene>
+                <img class="scene-bg" src="${imagePath}" alt="午后有人练习的社区球场">
+                <div class="scene-wash"></div>
+                ${people.map(([id, name, x, y, shirt]) => `
+                  <button class="npc-marker" data-person="${id}" style="left:${x}%;top:${y}%" aria-label="和${name}交谈">
+                    <span class="sprite" style="--shirt:${shirt}"></span>
+                    <span class="nameplate">${name}</span>
+                  </button>`).join('')}
+                <div data-dialogue-host></div>
+              </div>
+            </section>
+
+            <aside class="side-panel">
+              <h1>一起练习</h1>
+              <p>把一天的价值放在人身上。你不需要解决所有问题，只决定愿意陪谁一会儿。</p>
+              <div class="time-blocks" aria-label="剩余三段时间">
+                <span class="time-block"></span><span class="time-block"></span><span class="time-block"></span>
+              </div>
+              <div class="people-list">
+                ${people.map(([id, name]) => `<div class="person-row" data-person-row="${id}"><span>${name}</span><span class="person-status">还没说话</span></div>`).join('')}
+              </div>
+              <div class="hint-box">
+                点击场上的人，听听他们正在做什么。三段时间用完后，可以结束今天。
+                <div style="margin-top:14px"><button class="primary-button" data-end-together disabled>结束今天</button></div>
+              </div>
+            </aside>
+          </div>
+        </article>`;
+    }
+
+    function shopMarkup() {
+      return `
+        <article class="prototype" data-variant="shop">
+          <div class="game-layout">
+            <section class="scene-column">
+              ${topbar('练习结束前，场边小店开一会儿', '16:10', '零钱', '0 元')}
+              <div class="scene shop-scene" data-scene>
+                <img class="scene-bg" src="${imagePath}" alt="傍晚的社区球场和场边小店">
+                <div class="scene-wash"></div>
+                <div class="customer-figure" data-customer>
+                  <div class="sprite" style="--shirt:#6b7d8b"></div>
+                  <div class="speech" data-order-speech>林川想要一杯青草茶</div>
+                </div>
+                <section class="shop-counter" aria-label="场边小店柜台">
+                  <h2>今天的简易菜单</h2>
+                  <div class="order-line" data-order-line>林川练完了，想喝一杯青草茶。</div>
+                  <div class="recipe-grid">
+                    <button class="recipe-button" data-recipe="tea">
+                      <span class="recipe-shape"></span>
+                      <span class="recipe-name">青草茶</span>
+                      <span class="recipe-cost">茶叶 1，水 1</span>
+                    </button>
+                    <button class="recipe-button" data-recipe="fruit">
+                      <span class="recipe-shape"></span>
+                      <span class="recipe-name">果子水</span>
+                      <span class="recipe-cost">果子 1，水 1</span>
+                    </button>
+                    <button class="recipe-button" data-recipe="towel">
+                      <span class="recipe-shape"></span>
+                      <span class="recipe-name">干净毛巾</span>
+                      <span class="recipe-cost">布料 1</span>
+                    </button>
+                  </div>
+                  <div class="stock-line">
+                    <span>茶叶 <b data-stock="tea">2</b></span>
+                    <span>果子 <b data-stock="fruit">2</b></span>
+                    <span>布料 <b data-stock="cloth">2</b></span>
+                    <span>清水 <b data-stock="water">4</b></span>
+                  </div>
+                </section>
+                <div data-shop-overlay></div>
+              </div>
+            </section>
+
+            <aside class="side-panel">
+              <h1>场边小店</h1>
+              <p>经营不是为了无限赚钱。今天卖出的东西，会变成明天场地里看得见的一点变化。</p>
+              <div class="rule"></div>
+              <ul class="objective-list">
+                <li class="objective" data-shop-goal="serve">照顾完今天的四位客人</li>
+                <li class="objective" data-shop-goal="choose">把收入花在一处场地修缮上</li>
+              </ul>
+              <div class="upgrade-list" data-upgrades hidden>
+                <button class="upgrade-button" data-upgrade="球网" data-cost="24"><strong>换一张新球网</strong><span>24 元</span></button>
+                <button class="upgrade-button" data-upgrade="遮雨棚" data-cost="18"><strong>补好小店遮雨棚</strong><span>18 元</span></button>
+                <button class="upgrade-button" data-upgrade="看台" data-cost="28"><strong>修稳两排旧看台</strong><span>28 元</span></button>
+              </div>
+              <div class="hint-box">看清客人说的话，再点击对应商品。选错不会扣除库存。</div>
+            </aside>
+          </div>
+        </article>`;
+    }
+
+    const variants = [freeDayMarkup, togetherMarkup, shopMarkup];
+
+    function formatTime(minutes) {
+      const hour = Math.floor(minutes / 60);
+      const minute = minutes % 60;
+      return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+    }
+
+    function showToast(scene, text) {
+      scene.querySelector('.toast')?.remove();
+      const toast = document.createElement('div');
+      toast.className = 'toast';
+      toast.textContent = text;
+      scene.appendChild(toast);
+      const timer = setTimeout(() => toast.remove(), 2600);
+      return () => clearTimeout(timer);
+    }
+
+    function showSummary(scene, title, body, facts, replayLabel = '再过一天') {
+      scene.insertAdjacentHTML('beforeend', `
+        <div class="scene-dim"></div>
+        <section class="day-summary" role="dialog" aria-modal="true" aria-label="一天结束">
+          <h2>${title}</h2>
+          <p>${body}</p>
+          <div class="summary-facts">
+            ${facts.map(([label, value]) => `<div class="summary-fact">${label}<strong>${value}</strong></div>`).join('')}
+          </div>
+          <button class="primary-button" data-summary-replay>${replayLabel}</button>
+        </section>`);
+      scene.querySelector('[data-summary-replay]').addEventListener('click', () => mount(current));
+    }
+
+    function initFreeDay() {
+      const root = stage.querySelector('[data-variant="free"]');
+      const scene = root.querySelector('[data-scene]');
+      const player = root.querySelector('[data-player]');
+      const prompt = root.querySelector('[data-prompt]');
+      const timeEl = root.querySelector('[data-time]');
+      const energyEl = root.querySelector('[data-energy]');
+      const state = {
+        x: 50,
+        y: 82,
+        time: 550,
+        energy: 100,
+        fiber: 0,
+        wood: 0,
+        gathered: false,
+        met: false,
+        repaired: false,
+        ended: false,
+        removed: new Set()
+      };
+      const objects = {
+        'grass-a': { x: 18, y: 70, kind: 'grass' },
+        'grass-b': { x: 29, y: 47, kind: 'grass' },
+        'grass-c': { x: 77, y: 70, kind: 'grass' },
+        boards: { x: 83, y: 54, kind: 'boards' },
+        bench: { x: 65, y: 86, kind: 'bench' },
+        door: { x: 49, y: 22, kind: 'door' },
+        coach: { x: 60, y: 44, kind: 'coach' }
+      };
+      const cleanupFns = [];
+
+      function nearest() {
+        let best = null;
+        Object.entries(objects).forEach(([id, object]) => {
+          if (state.removed.has(id)) return;
+          const distance = Math.hypot((state.x - object.x) * 1.25, state.y - object.y);
+          if (distance < 10 && (!best || distance < best.distance)) best = { id, ...object, distance };
+        });
+        return best;
+      }
+
+      function update() {
+        player.style.left = `${state.x}%`;
+        player.style.top = `${state.y}%`;
+        timeEl.textContent = formatTime(state.time);
+        energyEl.textContent = String(state.energy);
+        root.querySelector('[data-fiber]').textContent = String(state.fiber);
+        root.querySelector('[data-wood]').textContent = String(state.wood);
+        root.querySelector('[data-goal="meet"]').classList.toggle('done', state.met);
+        state.gathered = state.gathered || (state.fiber >= 2 && state.wood >= 1);
+        root.querySelector('[data-goal="gather"]').classList.toggle('done', state.gathered);
+        root.querySelector('[data-goal="repair"]').classList.toggle('done', state.repaired);
+        const close = nearest();
+        const labels = {
+          grass: '按 E 收起可以编绳的长草',
+          boards: '按 E 捡起还能用的旧木板',
+          bench: state.repaired ? '长椅已经修好了' : '按 E 看看这张坏长椅',
+          door: '按 E 回到俱乐部小屋',
+          coach: '按 E 和郭教练说话'
+        };
+        prompt.textContent = close ? labels[close.kind] : '用 W A S D 走近感兴趣的东西';
+      }
+
+      function spend(minutes, energy) {
+        state.time = Math.min(18 * 60, state.time + minutes);
+        state.energy = Math.max(0, state.energy - energy);
+      }
+
+      function interactById(id, bypassDistance = false) {
+        if (state.ended || state.removed.has(id)) return;
+        const object = objects[id];
+        if (!object) return;
+        if (!bypassDistance && nearest()?.id !== id) return;
+
+        if (object.kind === 'grass') {
+          state.fiber += 1;
+          state.removed.add(id);
+          root.querySelector(`[data-object="${id}"]`)?.remove();
+          spend(15, 4);
+          cleanupFns.push(showToast(scene, '长草晒干后，可以编成结实的草绳。'));
+        }
+
+        if (object.kind === 'boards') {
+          state.wood += 1;
+          state.removed.add(id);
+          root.querySelector('[data-object="boards"]')?.remove();
+          spend(10, 3);
+          cleanupFns.push(showToast(scene, '木板有些潮，但中间一段仍然结实。'));
+        }
+
+        if (object.kind === 'coach') {
+          state.met = true;
+          spend(10, 0);
+          cleanupFns.push(showToast(scene, '郭教练：我还以为你是来让我们收拾东西的。'));
+        }
+
+        if (object.kind === 'bench') {
+          if (state.repaired) {
+            cleanupFns.push(showToast(scene, '木板被太阳晒得温热。坐一会儿也很好。'));
+          } else if (state.fiber >= 2 && state.wood >= 1) {
+            state.fiber -= 2;
+            state.wood -= 1;
+            state.repaired = true;
+            spend(35, 12);
+            root.querySelector('.object-shape.bench').classList.add('repaired');
+            cleanupFns.push(showToast(scene, '长椅不再摇晃。有人把水壶放了上来。'));
+          } else {
+            cleanupFns.push(showToast(scene, '需要两份草绳和一块木板。今天不修也没关系。'));
+          }
+        }
+
+        if (object.kind === 'door') {
+          if (!state.repaired || !state.met) {
+            cleanupFns.push(showToast(scene, '现在就可以休息，也可以再在场上待一会儿。'));
+            state.time += 10;
+          } else {
+            state.ended = true;
+            state.time = 18 * 60 + 20;
+            root.querySelector('[data-goal="home"]').classList.add('done');
+            showSummary(
+              scene,
+              '今天没有白过',
+              '安若童没有解决俱乐部的问题。她只是认识了一个人，修好了一张能坐下来的长椅。',
+              [['回屋时间', '18:20'], ['剩余体力', `${state.energy}`], ['完成的事', '2 件'], ['新的认识', '郭教练']]
+            );
+          }
+        }
+        update();
+      }
+
+      function act() {
+        const close = nearest();
+        if (close) interactById(close.id);
+      }
+
+      function move(key) {
+        if (state.ended) return;
+        const step = 2.7;
+        if (key === 'w') state.y = Math.max(18, state.y - step);
+        if (key === 's') state.y = Math.min(89, state.y + step);
+        if (key === 'a') state.x = Math.max(9, state.x - step);
+        if (key === 'd') state.x = Math.min(91, state.x + step);
+        player.classList.add('moving');
+        setTimeout(() => player.classList.remove('moving'), 120);
+        state.time = Math.min(18 * 60, state.time + 2);
+        update();
+      }
+
+      function keyHandler(event) {
+        if (/^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName) || event.target.isContentEditable) return;
+        const key = event.key.toLowerCase();
+        if (['w', 'a', 's', 'd'].includes(key)) {
+          event.preventDefault();
+          move(key);
+        }
+        if (key === 'e') {
+          event.preventDefault();
+          act();
+        }
+      }
+
+      document.addEventListener('keydown', keyHandler);
+      root.querySelectorAll('[data-move]').forEach(button => button.addEventListener('click', () => move(button.dataset.move)));
+      root.querySelector('[data-action]').addEventListener('click', act);
+      root.querySelectorAll('[data-object]').forEach(button => button.addEventListener('click', () => interactById(button.dataset.object, true)));
+      update();
+
+      cleanupActive = () => {
+        document.removeEventListener('keydown', keyHandler);
+        cleanupFns.forEach(fn => fn());
+      };
+    }
+
+    function initTogether() {
+      const root = stage.querySelector('[data-variant="together"]');
+      const scene = root.querySelector('[data-scene]');
+      const host = root.querySelector('[data-dialogue-host]');
+      const timeEl = root.querySelector('[data-time]');
+      const energyEl = root.querySelector('[data-energy]');
+      const endButton = root.querySelector('[data-end-together]');
+      const state = { used: 0, chosen: new Set(), time: 14 * 60 };
+      const people = {
+        lin: { name: '林川', text: '他在反复练同一个停球动作。每次失败都把球默默捡回来。', action: '替他捡球十分钟', result: '少跑了几趟之后，他终于把动作做顺了。' },
+        qiao: { name: '乔可', text: '她的水壶空了，却不想中断守门练习。', action: '去小屋灌满水壶', result: '她喝完水，把守门手套递给你看了一眼。' },
+        guo: { name: '郭教练', text: '他在擦一块已经看不清字迹的旧战术板。', action: '陪他重新画好线', result: '他讲起了这支队伍第一次参加比赛的下午。' },
+        xu: { name: '许姨', text: '她坐在场边，一针一针缝补训练背心。', action: '坐下来帮她分线', result: '两个人没说太多话，布袋很快就空了。' },
+        deng: { name: '邓叔', text: '他蹲在角旗旁，琢磨怎么让雨后的积水散得快一些。', action: '和他一起量排水沟', result: '他第一次改口，叫了你的名字。' }
+      };
+
+      function update() {
+        timeEl.textContent = formatTime(state.time);
+        energyEl.textContent = `${3 - state.used} 段`;
+        root.querySelectorAll('.time-block').forEach((block, index) => block.classList.toggle('used', index < state.used));
+        Object.keys(people).forEach(id => {
+          const done = state.chosen.has(id);
+          root.querySelector(`[data-person="${id}"]`).classList.toggle('done', done);
+          const row = root.querySelector(`[data-person-row="${id}"]`);
+          row.classList.toggle('done', done);
+          row.querySelector('.person-status').textContent = done ? '一起做过一件事' : '还没说话';
+        });
+        endButton.disabled = state.used < 3;
+      }
+
+      function closeDialogue() { host.innerHTML = ''; }
+
+      function openPerson(id) {
+        const person = people[id];
+        const done = state.chosen.has(id);
+        const full = state.used >= 3;
+        host.innerHTML = `
+          <section class="dialogue" role="dialog" aria-label="和${person.name}交谈">
+            <h3>${person.name}</h3>
+            <p>${done ? person.result : person.text}</p>
+            <div class="dialogue-actions">
+              <button class="secondary-button" data-close>先看看别处</button>
+              ${done ? '' : `<button class="primary-button" data-spend ${full ? 'disabled' : ''}>${full ? '今天已经安排好了' : person.action}</button>`}
+            </div>
+          </section>`;
+        host.querySelector('[data-close]').addEventListener('click', closeDialogue);
+        host.querySelector('[data-spend]')?.addEventListener('click', () => {
+          state.chosen.add(id);
+          state.used += 1;
+          state.time += 45;
+          update();
+          host.querySelector('p').textContent = person.result;
+          host.querySelector('[data-spend]')?.remove();
+        });
+      }
+
+      root.querySelectorAll('[data-person]').forEach(button => button.addEventListener('click', () => openPerson(button.dataset.person)));
+      endButton.addEventListener('click', () => {
+        const names = [...state.chosen].map(id => people[id].name).join('、');
+        showSummary(
+          scene,
+          '队伍记住了你',
+          `你把时间留给了${names}。没有一件事非你不可，但一起做过之后，场地变得不再陌生。`,
+          [['一起相处', '3 段'], ['回屋时间', formatTime(state.time)], ['新的默契', `${state.chosen.size} 人`], ['未完成任务', '0 个']]
+        );
+      });
+      update();
+      cleanupActive = () => {};
+    }
+
+    function initShop() {
+      const root = stage.querySelector('[data-variant="shop"]');
+      const scene = root.querySelector('[data-scene]');
+      const timeEl = root.querySelector('[data-time]');
+      const moneyEl = root.querySelector('[data-energy]');
+      const customer = root.querySelector('[data-customer]');
+      const speech = root.querySelector('[data-order-speech]');
+      const orderLine = root.querySelector('[data-order-line]');
+      const upgrades = root.querySelector('[data-upgrades]');
+      const stock = { tea: 2, fruit: 2, cloth: 2, water: 4 };
+      const orders = [
+        { name: '林川', wants: 'tea', item: '青草茶', price: 9, note: '练完了，想喝一杯青草茶。' },
+        { name: '许姨', wants: 'towel', item: '干净毛巾', price: 8, note: '手上都是旧球网的灰，想拿一条干净毛巾。' },
+        { name: '乔可', wants: 'fruit', item: '果子水', price: 12, note: '她今天扑了很多次地，想喝一杯凉的果子水。' },
+        { name: '邓叔', wants: 'tea', item: '青草茶', price: 9, note: '他收好工具，问还有没有热一点的青草茶。' }
+      ];
+      const recipeCost = {
+        tea: { tea: 1, water: 1 },
+        fruit: { fruit: 1, water: 1 },
+        towel: { cloth: 1 }
+      };
+      const state = { index: 0, money: 0, time: 970, upgraded: null };
+
+      function updateStock() {
+        Object.entries(stock).forEach(([key, value]) => {
+          root.querySelector(`[data-stock="${key}"]`).textContent = value;
+        });
+        timeEl.textContent = formatTime(state.time);
+        moneyEl.textContent = `${state.money} 元`;
+      }
+
+      function renderOrder() {
+        if (state.index >= orders.length) {
+          customer.hidden = true;
+          root.querySelector('[data-shop-goal="serve"]').classList.add('done');
+          upgrades.hidden = false;
+          orderLine.textContent = '客人都走了。今天的收入刚好能让场地发生一点变化。';
+          root.querySelectorAll('[data-recipe]').forEach(button => button.disabled = true);
+          root.querySelectorAll('[data-upgrade]').forEach(button => {
+            button.disabled = Number(button.dataset.cost) > state.money;
+          });
+          return;
+        }
+        const order = orders[state.index];
+        customer.hidden = false;
+        speech.textContent = `${order.name}想要${order.item}`;
+        orderLine.textContent = `${order.name}${order.note}`;
+      }
+
+      function canPay(cost) {
+        return Object.entries(cost).every(([key, amount]) => stock[key] >= amount);
+      }
+
+      function serve(recipe) {
+        const order = orders[state.index];
+        if (!order) return;
+        if (order.wants !== recipe) {
+          showToast(scene, `${order.name}今天想要的是${order.item}。`);
+          return;
+        }
+        const cost = recipeCost[recipe];
+        if (!canPay(cost)) {
+          showToast(scene, '今天的备料不够了。');
+          return;
+        }
+        Object.entries(cost).forEach(([key, amount]) => stock[key] -= amount);
+        state.money += order.price;
+        state.time += 20;
+        showToast(scene, `${order.name}接过${order.item}，在柜台边多站了一会儿。`);
+        state.index += 1;
+        updateStock();
+        renderOrder();
+      }
+
+      root.querySelectorAll('[data-recipe]').forEach(button => button.addEventListener('click', () => serve(button.dataset.recipe)));
+      root.querySelectorAll('[data-upgrade]').forEach(button => button.addEventListener('click', () => {
+        const cost = Number(button.dataset.cost);
+        if (cost > state.money || state.upgraded) return;
+        state.money -= cost;
+        state.upgraded = button.dataset.upgrade;
+        state.time += 35;
+        moneyEl.textContent = `${state.money} 元`;
+        root.querySelector('[data-shop-goal="choose"]').classList.add('done');
+        showSummary(
+          scene,
+          `${state.upgraded}修好了`,
+          '钱没有变成更大的数字，而是留在场地里。明天来到这里的人会直接看见它。',
+          [['接待客人', '4 人'], ['今日收入', '38 元'], ['用在场地', `${cost} 元`], ['收店时间', formatTime(state.time)]]
+        );
+      }));
+      updateStock();
+      renderOrder();
+      cleanupActive = () => {};
+    }
+
+    const controllers = [initFreeDay, initTogether, initShop];
+    const stage = document.getElementById('stage');
+    const picker = document.querySelector('.proto-picker');
+    const highlight = picker.querySelector('.proto-picker-highlight');
+    const items = [...picker.querySelectorAll('.proto-picker-item:not(.proto-picker-replay)')];
+    const replay = picker.querySelector('.proto-picker-replay');
+    let current = 0;
+
+    function moveHighlight() {
+      const el = items[current];
+      highlight.style.width = el.offsetWidth + 'px';
+      highlight.style.transform = `translateX(${el.offsetLeft}px)`;
+    }
+
+    function mount(i) {
+      cleanupActive();
+      cleanupActive = () => {};
+      stage.innerHTML = '';
+      requestAnimationFrame(() => {
+        stage.innerHTML = variants[i]();
+        controllers[i]();
+      });
+    }
+
+    function setActive(i) {
+      if (i < 0 || i >= variants.length) return;
+      current = i;
+      items.forEach((el, j) => {
+        el.toggleAttribute('data-active', j === i);
+        if (j === i) el.setAttribute('aria-current', 'true');
+        else el.removeAttribute('aria-current');
+      });
+      moveHighlight();
+      const url = new URL(location);
+      url.searchParams.set('v', i + 1);
+      history.replaceState(null, '', url);
+      mount(i);
+    }
+
+    items.forEach((el, i) => el.addEventListener('click', () => setActive(i)));
+    replay?.addEventListener('click', () => mount(current));
+    window.addEventListener('resize', moveHighlight);
+
+    document.addEventListener('keydown', (e) => {
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const num = parseInt(e.key, 10);
+      if (num >= 1 && num <= variants.length) setActive(num - 1);
+      else if (e.key === 'ArrowRight') setActive((current + 1) % variants.length);
+      else if (e.key === 'ArrowLeft') setActive((current - 1 + variants.length) % variants.length);
+      else if (e.key === 'r' || e.key === 'R') mount(current);
+    });
+
+    setActive((parseInt(new URLSearchParams(location.search).get('v'), 10) || 1) - 1);
+    requestAnimationFrame(() => requestAnimationFrame(() => picker.setAttribute('data-ready', '')));
+  </script>
+</body>
+</html>

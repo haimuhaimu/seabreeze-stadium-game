@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createGameState } from './game-state.js';
+import { chooseSeasonEventDecision, chooseSeasonNpcMemory, createGameState } from './game-state.js';
 import { createEpisodeState } from './episode-state.js';
-import { SAVE_KEY, V2_SAVE_KEY, LEGACY_SAVE_KEY, loadSave, writeSave, clearSave } from './save-game.js';
+import { offerEliteInvitation } from './elite-state.js';
+import { startSeasonEliteMatch } from './season-state.js';
+import { SAVE_KEY, V4_SAVE_KEY, V3_SAVE_KEY, V2_SAVE_KEY, LEGACY_SAVE_KEY, loadSave, writeSave, clearSave } from './save-game.js';
 
 function memoryStorage() {
   const values = new Map();
@@ -15,11 +17,11 @@ function memoryStorage() {
 
 test('a save record round-trips without losing state', () => {
   const storage = memoryStorage();
-  const state = { ...createGameState(), version: 3, episode: createEpisodeState() };
+  const state = { ...createGameState(), episode: createEpisodeState() };
   writeSave(storage, state, { x: 44, y: 82 });
   assert.deepEqual(loadSave(storage), {
     ok: true,
-    record: { version: 3, state, position: { x: 44, y: 82 }, mapId: 'training' }
+    record: { version: 5, state, position: { x: 44, y: 82 }, mapId: 'training' }
   });
 });
 
@@ -37,16 +39,25 @@ test('bad JSON and unsupported versions are rejected without deletion', () => {
 
 test('invalid shapes are rejected and an interrupted training round is closed', () => {
   const storage = memoryStorage();
-  storage.setItem(SAVE_KEY, JSON.stringify({ version: 3, state: {}, position: { x: 0, y: 0 }, mapId: 'training' }));
+  storage.setItem(SAVE_KEY, JSON.stringify({ version: 5, state: {}, position: { x: 0, y: 0 }, mapId: 'training' }));
   assert.equal(loadSave(storage).reason, 'invalid-shape');
 
-  const state = { ...createGameState(), version: 3, episode: { ...createEpisodeState(), activePromise: 'train' } };
+  const state = { ...createGameState(), episode: { ...createEpisodeState(), activePromise: 'train' } };
   state.training.started = true;
+  state.namingRights.freeTime.activeAction = { dayIndex: 11, actionId: 'shop' };
   writeSave(storage, state, { x: 50, y: 89 });
   const loaded = loadSave(storage);
   assert.equal(loaded.ok, true);
   assert.equal(loaded.record.state.training.started, false);
   assert.equal(loaded.record.state.episode.activePromise, null);
+  assert.equal(loaded.record.state.namingRights.freeTime.activeAction, null);
+});
+
+test('a version five save rejects unknown facility visit ids', () => {
+  const storage = memoryStorage();
+  const state = createGameState();
+  state.season.week.visitedProjectIds = ['missing'];
+  assert.throws(() => writeSave(storage, state, { x: 50, y: 89 }), /Invalid save record/);
 });
 
 test('a valid version one save migrates in memory without overwriting the legacy record', () => {
@@ -69,7 +80,7 @@ test('a valid version one save migrates in memory without overwriting the legacy
   const loaded = loadSave(storage);
   assert.equal(loaded.ok, true);
   assert.equal(loaded.migrated, true);
-  assert.equal(loaded.record.version, 3);
+  assert.equal(loaded.record.version, 5);
   assert.equal(loaded.record.state.economy.cash, 29);
   assert.equal(loaded.record.state.episode.id, 'last-roster-slot');
   assert.equal(storage.getItem(LEGACY_SAVE_KEY), raw);
@@ -95,7 +106,7 @@ test('an unfinished version two management week restarts spring 15 in memory', (
   const loaded = loadSave(storage);
   assert.equal(loaded.ok, true);
   assert.equal(loaded.migrated, true);
-  assert.equal(loaded.record.version, 3);
+  assert.equal(loaded.record.version, 5);
   assert.equal(loaded.record.state.dayIndex, 3);
   assert.equal(loaded.record.state.phase, 'morning');
   assert.deepEqual(loaded.record.state.repairs, ['awning']);
@@ -107,12 +118,172 @@ test('an unfinished version two management week restarts spring 15 in memory', (
 test('clearSave removes only the project save key', () => {
   const storage = memoryStorage();
   storage.setItem(SAVE_KEY, JSON.stringify({ anything: true }));
+  storage.setItem(V4_SAVE_KEY, JSON.stringify({ namingWeek: true }));
   storage.setItem(V2_SAVE_KEY, JSON.stringify({ legacyWeek: true }));
+  storage.setItem(V3_SAVE_KEY, JSON.stringify({ legacyEpisode: true }));
   storage.setItem(LEGACY_SAVE_KEY, JSON.stringify({ legacy: true }));
   storage.setItem('another-game', 'keep');
   clearSave(storage);
   assert.equal(storage.getItem(SAVE_KEY), null);
+  assert.equal(storage.getItem(V4_SAVE_KEY), null);
   assert.equal(storage.getItem(V2_SAVE_KEY), null);
+  assert.equal(storage.getItem(V3_SAVE_KEY), null);
   assert.equal(storage.getItem(LEGACY_SAVE_KEY), null);
   assert.equal(storage.getItem('another-game'), 'keep');
+});
+
+test('a version four naming-week save migrates in memory to an inactive league', () => {
+  const storage = memoryStorage();
+  const current = createGameState();
+  const state = {
+    ...current,
+    version: 4,
+    dayIndex: 16,
+    phase: 'complete',
+    namingRights: {
+      ...current.namingRights,
+      weekComplete: true,
+      settlement: { stadiumName: '海风球场', route: 'community-save' }
+    }
+  };
+  delete state.season;
+  const raw = JSON.stringify({ version: 4, state, position: { x: 52, y: 68 }, mapId: 'stadium' });
+  storage.setItem(V4_SAVE_KEY, raw);
+
+  const loaded = loadSave(storage);
+  assert.equal(loaded.ok, true);
+  assert.equal(loaded.migrated, true);
+  assert.equal(loaded.record.version, 5);
+  assert.equal(loaded.record.state.namingRights.settlement.stadiumName, '海风球场');
+  assert.equal(loaded.record.state.season.active, false);
+  assert.equal(storage.getItem(V4_SAVE_KEY), raw);
+  assert.equal(storage.getItem(SAVE_KEY), null);
+});
+
+test('an interrupted league match restarts without spending weekly preparation', () => {
+  const storage = memoryStorage();
+  const state = createGameState();
+  state.season.active = true;
+  state.season.seasonNumber = 1;
+  state.season.week.actions = ['train-attack', 'shop-day', 'community-open'];
+  state.season.match = {
+    opponentId: 'harbor-workers',
+    playerHome: true,
+    highlightIndex: 1,
+    homeGoals: 1,
+    awayGoals: 0,
+    choices: ['use-attack-work'],
+    callbackIds: ['attack'],
+    complete: false,
+    snapshot: { attack: 50, defense: 50, cohesion: 50, facility: 50, cash: 80 }
+  };
+  writeSave(storage, state, { x: 52, y: 68 }, 'stadium');
+  const loaded = loadSave(storage);
+  assert.equal(loaded.ok, true);
+  assert.equal(loaded.record.state.season.match, null);
+  assert.deepEqual(loaded.record.state.season.week.actions, ['train-attack', 'shop-day', 'community-open']);
+});
+
+test('an early version five league save gains incident fields on its next decision', () => {
+  const storage = memoryStorage();
+  const state = createGameState();
+  state.dayIndex = 17;
+  state.world.mapId = 'stadium';
+  state.season.active = true;
+  state.season.seasonNumber = 1;
+  state.season.projects.stands = 2;
+  delete state.season.week.eventId;
+  delete state.season.week.eventChoiceId;
+  delete state.season.week.eventTag;
+  delete state.season.week.memoryNpcIds;
+  delete state.season.week.visitedProjectIds;
+  delete state.season.eventHistory;
+  delete state.season.elite;
+  writeSave(storage, state, { x: 52, y: 68 }, 'stadium');
+  const loaded = loadSave(storage);
+  assert.equal(loaded.ok, true);
+  assert.equal(loaded.record.state.season.elite.status, 'idle');
+  const decided = chooseSeasonEventDecision(loaded.record.state, 'shared-pitch', 'share-half');
+  const remembered = chooseSeasonNpcMemory(decided, 'xiaoman');
+  assert.equal(remembered.season.projects.stands, 2);
+  assert.equal(remembered.season.week.eventChoiceId, 'share-half');
+  assert.deepEqual(remembered.season.week.memoryNpcIds, ['xiaoman']);
+  assert.deepEqual(remembered.season.week.visitedProjectIds, []);
+  assert.equal(remembered.season.eventHistory.length, 1);
+});
+
+test('an interrupted elite match returns to its invitation without duplicating rewards', () => {
+  const storage = memoryStorage();
+  const state = createGameState();
+  state.dayIndex = 23;
+  state.phase = 'complete';
+  state.world.mapId = 'stadium';
+  state.season.active = true;
+  state.season.seasonNumber = 1;
+  state.season.seasonComplete = true;
+  state.season.eliteQualified = true;
+  state.season.goals = {
+    ranking: { complete: true }, construction: { complete: true },
+    people: { complete: false }, finance: { complete: false }, eliteQualified: true
+  };
+  state.season.elite = offerEliteInvitation(state.season.elite, 1);
+  state.season = startSeasonEliteMatch(state.season, 'repair-buffer');
+  writeSave(storage, state, { x: 52, y: 68 }, 'stadium');
+  const loaded = loadSave(storage);
+  assert.equal(loaded.ok, true);
+  assert.equal(loaded.record.state.season.elite.status, 'invited');
+  assert.equal(loaded.record.state.season.elite.preparationId, null);
+  assert.equal(loaded.record.state.season.elite.match, null);
+  assert.equal(loaded.record.state.season.elite.result, null);
+  assert.deepEqual(loaded.record.state.season.elite.history, []);
+});
+
+test('a blocked storage reads as absent instead of crashing the page', () => {
+  const blocked = {
+    getItem: () => { throw new Error('SecurityError: local storage is blocked'); },
+    setItem: () => { throw new Error('SecurityError'); },
+    removeItem: () => { throw new Error('SecurityError'); }
+  };
+  assert.deepEqual(loadSave(blocked), { ok: false, reason: 'storage-unavailable' });
+});
+
+test('a quota failure is reported instead of interrupting play', () => {
+  let writes = 0;
+  const quotaFull = {
+    getItem: () => null,
+    setItem: () => {
+      writes += 1;
+      const error = new Error('QuotaExceededError');
+      error.name = 'QuotaExceededError';
+      throw error;
+    },
+    removeItem: () => {}
+  };
+  const result = writeSave(quotaFull, createGameState(), { x: 10, y: 20 });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'write-failed');
+  assert.equal(writes, 1, 'a failed write must not retry in a loop');
+});
+
+test('a successful write reports the stored record', () => {
+  const storage = memoryStorage();
+  const state = createGameState();
+  const result = writeSave(storage, state, { x: 12, y: 34 });
+  assert.equal(result.ok, true);
+  assert.equal(result.record.version, 5);
+  assert.equal(loadSave(storage).record.position.x, 12);
+});
+
+test('clearing a storage that throws stays non-fatal', () => {
+  const throwing = {
+    getItem: () => null,
+    setItem: () => {},
+    removeItem: () => { throw new Error('SecurityError'); }
+  };
+  assert.doesNotThrow(() => clearSave(throwing));
+});
+
+test('an invalid save record is still a programming error, not a storage failure', () => {
+  const storage = memoryStorage();
+  assert.throws(() => writeSave(storage, {}, { x: 0, y: 0 }), /Invalid save record/);
 });

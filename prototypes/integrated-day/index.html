@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#14221b">
-  <title>海风球场：安若童的第一周</title>
+  <title>海风球场：安若童的联赛生活</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="./styles.css?v=3">
+  <link rel="stylesheet" href="./styles.css?v=10">
 </head>
 <body>
   <main class="game" data-phase="morning">
@@ -17,6 +17,7 @@
         <div class="light-layer" aria-hidden="true"></div>
         <div class="water-glint" aria-hidden="true"></div>
         <div class="wind-layer" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+        <div class="construction-visuals" data-construction-visuals hidden aria-hidden="true"></div>
 
         <div class="repair-mark repair-net" data-repair-visual="net" hidden aria-hidden="true">
           <span class="item-sprite item-net"></span>
@@ -26,6 +27,11 @@
         </div>
         <div class="repair-mark repair-bleachers" data-repair-visual="bleachers" hidden aria-hidden="true">
           <span class="item-sprite item-planks"></span>
+        </div>
+
+        <div class="stadium-name-layer" data-stadium-sign data-sign="hidden" hidden aria-label="海风球场招牌">
+          <span class="stadium-name-old">海风球场</span>
+          <span class="stadium-name-cloth">澜岸体育</span>
         </div>
 
         <div class="morning-layer" data-morning-layer>
@@ -107,6 +113,19 @@
           <small data-care-progress>周日前决定去留</small>
         </button>
         <button class="ledger-toggle" data-ledger-toggle type="button">查看账本</button>
+      </aside>
+
+      <aside class="season-docket" data-season-docket hidden aria-label="海风联赛本轮状态">
+        <button data-season-board-open type="button">
+          <span data-season-round-label>第 1 轮</span>
+          <strong data-season-opponent>对阵港口工人队</strong>
+          <small><b data-season-rank>第 1 名</b><i></i><b data-season-actions>行动 0 / 3</b></small>
+          <small class="season-incident-line"><b data-season-incident-status>本轮事件待回应</b></small>
+          <small class="season-outlook-line" data-match-outlook>
+            <b data-outlook-deficit>开场不落后</b><i></i><b data-outlook-edge>实力领先 0.0</b><i></i><b data-outlook-construction>建设 0 级</b>
+          </small>
+          <small class="season-outlook-summary"><b data-outlook-summary>球场还没有摆出样子</b></small>
+        </button>
       </aside>
 
       <aside class="field-notes" data-notes hidden aria-label="今日记录">
@@ -222,7 +241,7 @@
 
       <section class="match-panel" data-match-panel hidden role="dialog" aria-modal="true" aria-label="主场比赛">
         <div class="match-scoreline">
-          <span>海风球场</span>
+          <span data-match-home>海风球场</span>
           <strong data-match-score>0 : 0</strong>
           <span data-match-opponent>客队</span>
         </div>
@@ -232,6 +251,62 @@
           <p data-match-copy></p>
         </div>
         <div class="match-options" data-match-options></div>
+      </section>
+
+      <section class="season-conversation" data-season-conversation hidden role="dialog" aria-modal="true" aria-label="人物谈话">
+        <div class="season-conversation-person">
+          <span class="npc-sprite npc-guo" data-season-npc-sprite aria-hidden="true"></span>
+          <div><span data-season-npc-role>球队的人</span><strong data-season-npc-name>郭教练</strong><small data-season-npc-bond>关系 0 / 5</small></div>
+        </div>
+        <button data-season-conversation-close type="button" aria-label="结束谈话">回到球场</button>
+        <p data-season-npc-copy></p>
+        <div class="season-memory" data-season-memory hidden>
+          <div class="season-memory-copy">
+            <span data-season-memory-source>回应刚刚的决定</span>
+            <strong data-season-memory-choice>把半块场地画出来</strong>
+            <small data-season-memory-status>不占本轮经营行动，关系 +1</small>
+          </div>
+          <button data-season-memory-talk type="button">把这件事谈清楚</button>
+        </div>
+        <div class="season-response-options" data-season-response-options></div>
+      </section>
+
+      <section class="season-event" data-season-event hidden role="dialog" aria-modal="true" aria-label="本轮球场事件">
+        <div class="season-event-heading">
+          <div>
+            <span data-season-event-kicker>训练开始以前</span>
+            <strong data-season-event-place>旧训练场</strong>
+          </div>
+          <button data-season-event-close type="button">回到球场</button>
+        </div>
+        <div class="season-event-person">
+          <span class="npc-sprite npc-assistant" data-season-event-sprite aria-hidden="true"></span>
+          <div><span data-season-event-speaker>小满带来的事</span><h2 data-season-event-title>谁先用半块场地</h2></div>
+        </div>
+        <div class="season-event-beats" data-season-event-beats></div>
+        <div class="season-event-options" data-season-event-options></div>
+        <div class="season-event-result" data-season-event-result hidden></div>
+      </section>
+
+      <section class="season-board" data-season-board hidden role="dialog" aria-modal="true" aria-label="海风联赛手册">
+        <div class="season-board-heading">
+          <div><span>海风联赛手册</span><strong data-season-board-title>第一赛季 · 第 1 轮</strong></div>
+          <button data-season-board-close type="button">回到球场</button>
+        </div>
+        <div class="season-board-layout">
+          <div>
+            <h2>积分榜</h2>
+            <div class="season-standings" data-season-standings></div>
+          </div>
+          <div>
+            <h2>留下球场的四件事</h2>
+            <div class="season-goals" data-season-goals></div>
+            <h2>建设进度</h2>
+            <div class="season-projects" data-season-projects></div>
+            <h2 class="season-history-title">这赛季发生过的事</h2>
+            <div class="season-history" data-season-history></div>
+          </div>
+        </div>
       </section>
 
       <section class="hearing-panel" data-hearing hidden role="dialog" aria-modal="true" aria-label="五把椅子的听证会">
@@ -260,6 +335,7 @@
       </div>
 
       <div class="toast-host" data-toast-host aria-live="polite"></div>
+      <p class="storage-warning" data-storage-warning hidden>浏览器阻止了本地存档，这次进度在关闭页面前仍可继续，但不会被保存</p>
 
       <div class="touch-controls" aria-label="移动控制">
         <button data-move="w" type="button" aria-label="向上">▲</button>
@@ -295,28 +371,95 @@
         </div>
       </section>
 
-      <section class="week-summary" data-week-summary hidden role="dialog" aria-modal="true" aria-label="第一周结算">
-        <span>春 15 日至春 21 日</span>
+      <section class="week-summary" data-week-summary hidden role="dialog" aria-modal="true" aria-label="经营周结算">
+        <span data-week-range>春 15 日至春 21 日</span>
         <h1 data-week-summary-title>球场撑过了第一周</h1>
         <p data-week-summary-copy></p>
+        <div class="naming-reveal" data-naming-summary hidden>
+          <span>蓝布落下以后</span>
+          <strong data-final-stadium-name>海风球场</strong>
+          <p data-final-authority>五把椅子保留最终决定权</p>
+        </div>
         <div class="week-character" data-week-character>
-          <div><span>小满</span><strong data-week-xiaoman>还没有做出决定</strong></div>
-          <div><span>没来得及的事</span><strong data-week-missed>还没有留下遗憾</strong></div>
-          <div><span>沈峤</span><strong data-week-shen>仍在场外等待</strong></div>
-          <div><span>下周危机</span><strong data-week-next-crisis>球场的决定权仍未落定</strong></div>
+          <div><span data-week-label="first">小满</span><strong data-week-xiaoman>还没有做出决定</strong></div>
+          <div><span data-week-label="second">没来得及的事</span><strong data-week-missed>还没有留下遗憾</strong></div>
+          <div><span data-week-label="third">沈峤</span><strong data-week-shen>仍在场外等待</strong></div>
+          <div><span data-week-label="fourth">下周危机</span><strong data-week-next-crisis>球场的决定权仍未落定</strong></div>
         </div>
         <div class="week-score" data-week-score></div>
         <div class="week-metrics" data-week-metrics></div>
         <strong class="week-next">沈峤没有离开。他把一份新的债权文件交给了罗馆长。</strong>
         <div class="week-actions">
+          <button data-begin-naming-week hidden type="button">进入第二个经营周</button>
+          <button data-begin-season hidden type="button">进入海风联赛</button>
           <button data-week-walk type="button">继续在球场走走</button>
           <button data-week-restart type="button">从序章重新开始</button>
         </div>
       </section>
 
+      <section class="season-summary" data-season-summary hidden role="dialog" aria-modal="true" aria-label="联赛本轮结算">
+        <span data-season-summary-kicker>海风联赛 · 第 1 轮</span>
+        <h1 data-season-summary-title>这场比赛留下了结果</h1>
+        <p data-season-summary-copy></p>
+        <div class="season-score-card">
+          <strong data-season-summary-score>海风 0 : 0 港工</strong>
+          <span data-season-summary-rank>当前第 1 名</span>
+        </div>
+        <div class="season-summary-event" data-season-summary-event></div>
+        <div class="season-summary-grid" data-season-summary-grid></div>
+        <div class="season-summary-actions">
+          <button data-season-summary-board type="button">查看积分与目标</button>
+          <button data-season-next type="button">进入下一轮</button>
+        </div>
+      </section>
+
+      <section class="elite-panel" data-elite-panel hidden role="dialog" aria-modal="true" aria-label="精英邀请赛">
+        <div class="elite-heading">
+          <div>
+            <span data-elite-kicker>东海岸精英邀请赛</span>
+            <h1 data-elite-title>球场收到了一封正式邀请</h1>
+          </div>
+          <button data-elite-close type="button">回到球场</button>
+        </div>
+        <div class="elite-opponent-card">
+          <span class="npc-sprite npc-qiaoqiao" aria-hidden="true"></span>
+          <div>
+            <small>本届对手</small>
+            <strong data-elite-opponent>鹤岭青训联队</strong>
+            <p data-elite-opponent-copy></p>
+          </div>
+        </div>
+        <div data-elite-invitation>
+          <p class="elite-qualification" data-elite-qualification></p>
+          <div class="elite-preparations" data-elite-preparations></div>
+          <button class="elite-skip" data-elite-skip type="button">本届不参加，进入下一赛季</button>
+        </div>
+        <div data-elite-match hidden>
+          <div class="elite-scoreline">
+            <span>海风队</span>
+            <strong data-elite-score>0 : 2</strong>
+            <span>鹤岭</span>
+          </div>
+          <div class="elite-moment">
+            <small data-elite-minute>第 17 分钟</small>
+            <h2 data-elite-moment-title>第一脚怎么交出去</h2>
+            <p data-elite-moment-copy></p>
+          </div>
+          <div class="elite-choices" data-elite-choices></div>
+        </div>
+        <div class="elite-result" data-elite-result hidden>
+          <span>这次结果会永久保留</span>
+          <h2 data-elite-result-title>击败精英队</h2>
+          <strong class="elite-final-score" data-elite-result-score>海风 2 : 1 鹤岭</strong>
+          <p data-elite-result-copy></p>
+          <div class="elite-rewards" data-elite-rewards></div>
+          <button data-elite-next type="button">带着结果进入下一赛季</button>
+        </div>
+      </section>
+
       <section class="start-card" data-start-card hidden aria-label="海风球场存档">
-        <span>七日主线已经开放</span>
-        <h1>从场边小店，走进海风球场的第一周</h1>
+        <span>完整故事与海风联赛已经开放</span>
+        <h1>从场边小店，走进一座不会轻易倒下的球场</h1>
         <img class="start-preview" src="./assets/seabreeze-main-stadium-v1.png" alt="海边十一人足球主赛场、双侧看台和周末集市">
         <p data-save-summary></p>
         <div class="start-actions">
@@ -327,6 +470,6 @@
       </section>
     </section>
   </main>
-  <script type="module" src="./game.js?v=3"></script>
+  <script type="module" src="./game.js?v=9"></script>
 </body>
 </html>
